@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.1.0 — Multi-Provider Free-Tier AI + Centralized Facebook Authentication
+
+### New: multi-provider AI system
+- Provider priority: **Gemini → Groq → OpenRouter → Custom → OpenAI** (free-tier providers first).
+- New **Groq** and **OpenRouter** providers (OpenAI-compatible endpoints, free-tier models).
+- Per-provider enable/disable, model selection, encrypted keys, connection **Test** button, connection status with last-tested time, daily/monthly usage per provider.
+- Automatic 429 rate-limit handling with `Retry-After` cooldowns (60–3600 s), retry limits, configurable timeout.
+- Automatic fallback between **enabled + configured** providers only — never silently switches to a model you did not select, never enables a paid provider without approval.
+- Usage & cost protection: request counters, token tracking, daily/monthly limits that **pause AI** until the admin raises them, optional alert emails, error log panel.
+- **AI image generation is a separate provider setting** (`off` by default, clearly marked PAID) — text providers are never assumed to generate images.
+
+### New: centralized Facebook authentication
+- One-time OAuth login on the **Facebook Connection** tab powers every module (AI posting, Direct posting, scheduler, calendar, poster publishing, comment assistant, inbox assistant, analytics, best time/product, queue, history) — no per-module logins or manual tokens.
+- Default page setting, token validity display, expiry monitoring.
+- Automatic detection of revoked/expired authorization (Graph codes 190/102/10): affected operations pause safely, the queue stops posting, an admin notice appears, and reconnecting clears the state.
+- Granted vs missing permissions panel with a permission → feature mapping table and App Review guidance.
+
+### Unchanged guarantees
+- Direct WooCommerce auto posting works with **zero AI configuration**.
+- Facebook authentication and AI API authentication are completely separate.
+- All V3.0 features preserved; data-migrating upgrade (no data loss).
+
 ## 3.0.0 — Ultimate Master Upgrade
 
 ### New: two independent posting engines

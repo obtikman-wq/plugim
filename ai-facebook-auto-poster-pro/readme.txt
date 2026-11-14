@@ -4,7 +4,7 @@ Tags: facebook, woocommerce, auto post, ai, scheduler, marketing
 Requires at least: 6.2
 Tested up to: 6.7
 Requires PHP: 8.1
-Stable tag: 3.0.0
+Stable tag: 3.1.0
 License: GPL-2.0-or-later
 
 AI-powered Facebook marketing automation platform for WooCommerce: scheduled posting with AI or completely without AI (Direct Mode), product rotation, comment and Messenger assistants, poster designer, marketing calendar, best-time recommendations, and analytics.
@@ -48,6 +48,17 @@ AI-powered Facebook marketing automation platform for WooCommerce: scheduled pos
 * Action Scheduler (bundled with WooCommerce) or a real cron job for reliable scheduling.
 
 == Changelog ==
+
+= 3.1.0 =
+* New: Multi-provider AI system with free-tier priority — Gemini → Groq → OpenRouter → Custom → OpenAI.
+* New: Per-provider enable/disable, model selection, connection test, status, daily/monthly usage.
+* New: Automatic rate-limit handling (Retry-After), retry + fallback between enabled providers only — never silently switches to a paid model.
+* New: Usage & cost protection — request counters, token tracking, daily/monthly limits with pause + admin alerts, timeout and retry limits.
+* New: Separate AI image generation provider setting (off by default, clearly marked PAID).
+* New: Centralized Facebook authentication — one-time login powers every module; no per-module tokens.
+* New: Default page setting, token validity display, reconnect banner, granted/missing permissions with feature mapping.
+* Fix: Queue pauses safely when Facebook authorization is invalid; Direct WooCommerce posting remains fully AI-independent.
+
 
 = 3.0.0 =
 * Ultimate upgrade: Direct (no-AI) posting engine + AI engine with three posting modes and AI→Direct fallback.

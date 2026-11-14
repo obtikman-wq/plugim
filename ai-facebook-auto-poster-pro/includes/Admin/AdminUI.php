@@ -2,6 +2,7 @@
 
 namespace AIFB\Admin;
 
+use AIFB\AI\Manager as AIManager;
 use AIFB\Analytics\Analytics;
 use AIFB\Assistants\Comments;
 use AIFB\Assistants\Inbox;
@@ -421,6 +422,15 @@ final class AdminUI {
 			$redirect( sanitize_key( wp_unslash( $_POST['back_tab'] ?? 'queue' ) ), __( 'Product changed.', 'aifbp' ) );
 		}
 
+		if ( isset( $_POST['aifbp_test_provider'], $_POST['provider_id'] ) ) {
+			check_admin_referer( 'aifbp_settings' );
+
+			$id   = sanitize_key( wp_unslash( $_POST['provider_id'] ) );
+			$test = AIManager::test_provider( $id );
+
+			$redirect( 'ai', is_wp_error( $test ) ? sprintf( '%s: %s', ucfirst( $id ), $test->get_error_message() ) : sprintf( '%s: %s', ucfirst( $id ), $test['message'] ) );
+		}
+
 		if ( isset( $_POST['aifbp_poll_comments'] ) ) {
 			check_admin_referer( 'aifbp_comments' );
 			$found = Comments::poll();
@@ -570,6 +580,7 @@ final class AdminUI {
 			'assistant_language', 'assistant_tone', 'assistant_provider', 'webhook_verify_token',
 			'poster_size', 'poster_template', 'poster_bg', 'poster_accent', 'poster_text',
 			'poster_brand', 'poster_cta', 'poster_font_path', 'posting_mode',
+			'groq_model', 'openrouter_model', 'image_provider', 'image_model', 'default_page',
 		];
 
 		foreach ( $text_keys as $key ) {
@@ -578,7 +589,7 @@ final class AdminUI {
 			}
 		}
 
-		foreach ( [ 'openai_key', 'gemini_key', 'custom_key' ] as $key ) {
+		foreach ( [ 'openai_key', 'gemini_key', 'custom_key', 'groq_key', 'openrouter_key' ] as $key ) {
 			if ( isset( $_POST[ $key ] ) && '' !== (string) $_POST[ $key ] ) {
 				$s[ $key ] = sanitize_text_field( wp_unslash( $_POST[ $key ] ) );
 			}
@@ -590,7 +601,7 @@ final class AdminUI {
 			}
 		}
 
-		foreach ( [ 'include_price', 'include_link', 'include_hashtags', 'include_cta', 'price_badge', 'ai_image_gen', 'ai_image_understand', 'ai_fallback_direct', 'skip_out_of_stock', 'comment_assistant', 'inbox_assistant', 'assistant_auto_reply', 'assistant_approval', 'assistant_privacy', 'poster_enabled', 'poster_badge', 'poster_save_media' ] as $key ) {
+		foreach ( [ 'include_price', 'include_link', 'include_hashtags', 'include_cta', 'price_badge', 'ai_image_gen', 'ai_image_understand', 'ai_fallback_direct', 'skip_out_of_stock', 'comment_assistant', 'inbox_assistant', 'assistant_auto_reply', 'assistant_approval', 'assistant_privacy', 'poster_enabled', 'poster_badge', 'poster_save_media', 'ai_fallback', 'usage_alerts', 'provider_enabled_gemini', 'provider_enabled_groq', 'provider_enabled_openrouter', 'provider_enabled_custom', 'provider_enabled_openai' ] as $key ) {
 			$s[ $key ] = isset( $_POST[ $key ] ) ? 1 : 0;
 		}
 
@@ -601,6 +612,20 @@ final class AdminUI {
 		$s['post_interval_min']   = max( 5, absint( wp_unslash( $_POST['post_interval_min'] ?? 60 ) ) );
 		$s['repeat_after_days']   = max( 0, absint( wp_unslash( $_POST['repeat_after_days'] ?? 30 ) ) );
 		$s['data_retention_days'] = max( 7, absint( wp_unslash( $_POST['data_retention_days'] ?? 90 ) ) );
+		$s['ai_daily_limit']      = max( 0, absint( wp_unslash( $_POST['ai_daily_limit'] ?? 0 ) ) );
+		$s['ai_monthly_limit']    = max( 0, absint( wp_unslash( $_POST['ai_monthly_limit'] ?? 0 ) ) );
+		$s['ai_timeout']          = max( 10, min( 300, absint( wp_unslash( $_POST['ai_timeout'] ?? 30 ) ) ) );
+		$s['ai_retry_limit']      = max( 1, min( 10, absint( wp_unslash( $_POST['ai_retry_limit'] ?? 2 ) ) ) );
+
+		if ( ! in_array( $s['image_provider'], [ 'off', 'openai' ], true ) ) {
+			$s['image_provider'] = 'off';
+		}
+
+		$pages_list = Settings::pages();
+
+		if ( '' !== (string) $s['default_page'] && ! isset( $pages_list[ (string) $s['default_page'] ] ) ) {
+			$s['default_page'] = '';
+		}
 
 		if ( ! in_array( $s['posting_mode'], [ 'ai', 'direct', 'both' ], true ) ) {
 			$s['posting_mode'] = 'both';
@@ -745,7 +770,15 @@ final class AdminUI {
 		$health  = ScheduleManager::cron_health();
 		$connected = '' !== OAuth::user_token();
 		$max     = max( 1, ...array_merge( [ 1 ], array_map( 'intval', array_column( $totals['per_day'], 'posts' ) ?: [ 1 ] ) ) );
+		$ai_limit = AIManager::limit_error();
+		$fb_notice = OAuth::auth_notice();
 		?>
+		<?php if ( $fb_notice ) : ?>
+			<div class="notice notice-error" style="margin:0 0 16px"><p><strong><?php esc_html_e( 'Facebook reconnect needed — posting is paused.', 'aifbp' ); ?></strong> <?php echo esc_html( $fb_notice ); ?> <a href="<?php echo esc_url( admin_url( 'admin.php?page=aifbp&tab=connection' ) ); ?>"><?php esc_html_e( 'Go to Facebook Connection', 'aifbp' ); ?></a></p></div>
+		<?php endif; ?>
+		<?php if ( is_wp_error( $ai_limit ) ) : ?>
+			<div class="notice notice-warning" style="margin:0 0 16px"><p><strong><?php esc_html_e( 'AI generation is paused.', 'aifbp' ); ?></strong> <?php echo esc_html( $ai_limit->get_error_message() ); ?> <?php esc_html_e( 'Direct posting continues working without AI.', 'aifbp' ); ?> <a href="<?php echo esc_url( admin_url( 'admin.php?page=aifbp&tab=ai' ) ); ?>"><?php esc_html_e( 'Go to AI Settings', 'aifbp' ); ?></a></p></div>
+		<?php endif; ?>
 		<div class="aifbp-cards">
 			<div class="aifbp-card"><span class="aifbp-card-num"><?php echo esc_html( $counts['posted'] ); ?></span><span><?php esc_html_e( 'Posted', 'aifbp' ); ?></span></div>
 			<div class="aifbp-card"><span class="aifbp-card-num"><?php echo esc_html( $counts['pending'] ); ?></span><span><?php esc_html_e( 'Pending', 'aifbp' ); ?></span></div>
@@ -807,10 +840,24 @@ final class AdminUI {
 	}
 
 	private function tab_connection(): void {
-		$s     = Settings::all();
-		$pages = Settings::pages();
+		$s      = Settings::all();
+		$pages  = Settings::pages();
 		$expiry = OAuth::token_expiry();
+		$notice = OAuth::auth_notice();
+		$granted = OAuth::granted_permissions();
+		$map = [
+			'pages_show_list'         => __( 'Facebook connection & page list', 'aifbp' ),
+			'pages_manage_posts'      => __( 'Publishing posts (AI + Direct, queue, calendar, posters)', 'aifbp' ),
+			'pages_read_engagement'   => __( 'Insights & analytics (reach, impressions, clicks)', 'aifbp' ),
+			'pages_manage_engagement' => __( 'Comment assistant replies', 'aifbp' ),
+			'pages_read_user_content' => __( 'Reading page comments (comment assistant)', 'aifbp' ),
+			'pages_messaging'         => __( 'Messenger inbox assistant', 'aifbp' ),
+		];
 		?>
+		<?php if ( '' !== $notice ) : ?>
+			<div class="notice notice-error" style="margin:0 0 16px"><p><strong><?php esc_html_e( 'Facebook authorization problem — reconnect required.', 'aifbp' ); ?></strong> <?php echo esc_html( $notice ); ?> <?php esc_html_e( 'All posting, assistants and insights that use Facebook are paused until you reconnect below. Direct WooCommerce data is untouched.', 'aifbp' ); ?></p></div>
+		<?php endif; ?>
+
 		<form method="post">
 			<?php wp_nonce_field( 'aifbp_settings' ); ?>
 			<table class="form-table" role="presentation">
@@ -827,12 +874,13 @@ final class AdminUI {
 				</tr>
 			</table>
 
-			<h2><?php esc_html_e( 'OAuth connection', 'aifbp' ); ?></h2>
+			<h2><?php esc_html_e( 'One-time Facebook login', 'aifbp' ); ?></h2>
 			<?php if ( OAuth::is_configured() ) : ?>
 				<p>
-					<a class="button button-primary" href="<?php echo esc_url( OAuth::login_url() ); ?>"><?php esc_html_e( 'Connect Facebook account', 'aifbp' ); ?></a>
+					<a class="button button-primary" href="<?php echo esc_url( OAuth::login_url() ); ?>"><?php echo '' !== OAuth::user_token() ? esc_html__( 'Reconnect Facebook account', 'aifbp' ) : esc_html__( 'Connect Facebook account', 'aifbp' ); ?></a>
 				</p>
 				<p class="description">
+					<?php esc_html_e( 'One authorization powers every module: AI posting, Direct posting, scheduler, calendar, poster publishing, comment assistant, inbox assistant, analytics and best-time analysis. No per-module login or manual token entry is needed. Facebook login and AI API keys are completely separate.', 'aifbp' ); ?><br />
 					<?php esc_html_e( 'Add this redirect URI to your Facebook app settings (Valid OAuth Redirect URIs):', 'aifbp' ); ?><br />
 					<code><?php echo esc_html( OAuth::redirect_uri() ); ?></code>
 				</p>
@@ -841,6 +889,11 @@ final class AdminUI {
 			<?php endif; ?>
 
 			<p>
+				<?php if ( '' !== OAuth::user_token() ) : ?>
+					<span class="aifbp-status aifbp-status-<?php echo OAuth::is_valid() ? 'posted' : 'failed'; ?>">
+						<?php echo OAuth::is_valid() ? esc_html__( '✓ Token valid', 'aifbp' ) : esc_html__( '✖ Token invalid or expired', 'aifbp' ); ?>
+					</span>
+				<?php endif; ?>
 				<?php if ( $expiry > 0 ) : ?>
 					<span class="aifbp-status aifbp-status-<?php echo $expiry > time() + 7 * DAY_IN_SECONDS ? 'posted' : 'failed'; ?>">
 						<?php echo esc_html( sprintf( __( 'User token expires: %s', 'aifbp' ), date( 'Y-m-d H:i', $expiry ) ) ); ?>
@@ -886,6 +939,18 @@ final class AdminUI {
 			<?php wp_nonce_field( 'aifbp_settings' ); ?>
 			<table class="form-table" role="presentation">
 				<tr>
+					<th><label for="default_page"><?php esc_html_e( 'Default page', 'aifbp' ); ?></label></th>
+					<td>
+						<select id="default_page" name="default_page">
+							<option value=""><?php esc_html_e( '— First selected page —', 'aifbp' ); ?></option>
+							<?php foreach ( $pages as $pid => $page ) : ?>
+								<option value="<?php echo esc_attr( (string) $pid ); ?>" <?php selected( (string) ( $s['default_page'] ?? '' ), (string) $pid ); ?>><?php echo esc_html( $page['name'] ); ?></option>
+							<?php endforeach; ?>
+						</select>
+						<p class="description"><?php esc_html_e( 'Used by Post now and single-action publishing. Schedules can pick their own pages.', 'aifbp' ); ?></p>
+					</td>
+				</tr>
+				<tr>
 					<th><label for="test_page_id"><?php esc_html_e( 'Test page', 'aifbp' ); ?></label></th>
 					<td>
 						<select id="test_page_id" name="test_page_id">
@@ -902,76 +967,226 @@ final class AdminUI {
 				<button type="submit" name="aifbp_disconnect" class="button button-link-delete"><?php esc_html_e( 'Disconnect all', 'aifbp' ); ?></button>
 			</p>
 		</form>
+
+		<div class="aifbp-panel">
+			<h2><?php esc_html_e( 'Permissions & available features', 'aifbp' ); ?></h2>
+			<?php if ( is_wp_error( $granted ) ) : ?>
+				<p class="description"><?php echo esc_html( $granted->get_error_message() ); ?></p>
+			<?php elseif ( empty( $granted ) ) : ?>
+				<p class="description"><?php esc_html_e( 'Connect Facebook to load granted permissions.', 'aifbp' ); ?></p>
+			<?php else : ?>
+				<table class="widefat striped" style="max-width: 780px">
+					<thead><tr><th><?php esc_html_e( 'Permission', 'aifbp' ); ?></th><th><?php esc_html_e( 'Feature', 'aifbp' ); ?></th><th><?php esc_html_e( 'Status', 'aifbp' ); ?></th></tr></thead>
+					<tbody>
+						<?php foreach ( $map as $perm => $feature ) : ?>
+							<tr>
+								<td><code><?php echo esc_html( $perm ); ?></code></td>
+								<td><?php echo esc_html( $feature ); ?></td>
+								<td>
+									<?php if ( in_array( $perm, $granted, true ) ) : ?>
+										<span class="aifbp-status aifbp-status-posted"><?php esc_html_e( '✓ Granted', 'aifbp' ); ?></span>
+									<?php else : ?>
+										<span class="aifbp-status aifbp-status-failed"><?php esc_html_e( '✖ Missing — requires additional authorization / App Review', 'aifbp' ); ?></span>
+									<?php endif; ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<p class="description"><?php esc_html_e( 'Facebook Login does not automatically grant every permission. Features using a missing permission stay disabled until you re-authorize with that permission approved in Meta App Review. Only the permissions required by the features you enable are requested.', 'aifbp' ); ?></p>
+			<?php endif; ?>
+		</div>
 		<?php
 	}
 
 	private function tab_ai(): void {
-		$s = Settings::all();
+		$s         = Settings::all();
+		$providers = AIManager::PRIORITY;
+		$free      = [ 'gemini' => true, 'groq' => true, 'openrouter' => true, 'custom' => null, 'openai' => false ];
+		$limit_err = AIManager::limit_error();
 		?>
-		<form method="post">
-			<?php wp_nonce_field( 'aifbp_settings' ); ?>
-			<table class="form-table" role="presentation">
-				<tr>
-					<th><label for="ai_provider"><?php esc_html_e( 'AI provider', 'aifbp' ); ?></label></th>
-					<td>
-						<select id="ai_provider" name="ai_provider">
-							<option value="openai" <?php selected( $s['ai_provider'], 'openai' ); ?>><?php esc_html_e( 'OpenAI', 'aifbp' ); ?></option>
-							<option value="gemini" <?php selected( $s['ai_provider'], 'gemini' ); ?>><?php esc_html_e( 'Google Gemini', 'aifbp' ); ?></option>
-							<option value="custom" <?php selected( $s['ai_provider'], 'custom' ); ?>><?php esc_html_e( 'Custom OpenAI-compatible', 'aifbp' ); ?></option>
-						</select>
-					</td>
-				</tr>
-			</table>
+		<?php if ( null !== $limit_err ) : ?>
+			<div class="notice notice-warning"><p>⚠️ <?php echo esc_html( $limit_err->get_error_message() ); ?></p></div>
+		<?php endif; ?>
 
-			<h2><?php esc_html_e( 'OpenAI', 'aifbp' ); ?></h2>
-			<table class="form-table" role="presentation">
-				<tr><th><label for="openai_key"><?php esc_html_e( 'API key', 'aifbp' ); ?></label></th><td><input type="password" id="openai_key" name="openai_key" class="regular-text" value="" placeholder="<?php echo esc_attr( '' !== $s['openai_key'] ? __( '(saved)', 'aifbp' ) : '' ); ?>" autocomplete="new-password" /></td></tr>
-				<tr><th><label for="openai_base"><?php esc_html_e( 'Base URL', 'aifbp' ); ?></label></th><td><input type="url" id="openai_base" name="openai_base" class="regular-text" value="<?php echo esc_attr( $s['openai_base'] ); ?>" /></td></tr>
-				<tr><th><label for="openai_model"><?php esc_html_e( 'Model', 'aifbp' ); ?></label></th><td><input type="text" id="openai_model" name="openai_model" class="regular-text" value="<?php echo esc_attr( $s['openai_model'] ); ?>" /></td></tr>
-			</table>
+		<div class="aifbp-panel">
+			<h2><?php esc_html_e( 'Provider priority & fallback', 'aifbp' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'Fallback order:', 'aifbp' ); ?>
+				<?php foreach ( $providers as $i => $id ) : ?>
+					<code><?php echo esc_html( (string) ( $i + 1 ) ); ?>. <?php echo esc_html( ucfirst( $id ) ); ?></code>
+				<?php endforeach; ?>
+			</p>
+			<form method="post">
+				<?php wp_nonce_field( 'aifbp_settings' ); ?>
+				<table class="form-table" role="presentation">
+					<tr><th><?php esc_html_e( 'Automatic fallback', 'aifbp' ); ?></th><td><label><input type="checkbox" name="ai_fallback" value="1" <?php checked( $s['ai_fallback'], 1 ); ?> /> <?php esc_html_e( 'If the primary provider fails or is rate limited, try the next enabled provider (only providers you configured and enabled are used — the plugin never switches to a model you did not select)', 'aifbp' ); ?></label></td></tr>
+				</table>
+			</div>
 
-			<h2><?php esc_html_e( 'Google Gemini', 'aifbp' ); ?></h2>
-			<table class="form-table" role="presentation">
-				<tr><th><label for="gemini_key"><?php esc_html_e( 'API key', 'aifbp' ); ?></label></th><td><input type="password" id="gemini_key" name="gemini_key" class="regular-text" value="" placeholder="<?php echo esc_attr( '' !== $s['gemini_key'] ? __( '(saved)', 'aifbp' ) : '' ); ?>" autocomplete="new-password" /></td></tr>
-				<tr><th><label for="gemini_model"><?php esc_html_e( 'Model', 'aifbp' ); ?></label></th><td><input type="text" id="gemini_model" name="gemini_model" class="regular-text" value="<?php echo esc_attr( $s['gemini_model'] ); ?>" /></td></tr>
-			</table>
+			<div class="aifbp-panel">
+				<h2><?php esc_html_e( 'AI providers', 'aifbp' ); ?></h2>
+				<table class="widefat striped">
+					<thead><tr><th><?php esc_html_e( 'Provider', 'aifbp' ); ?></th><th><?php esc_html_e( 'API key', 'aifbp' ); ?></th><th><?php esc_html_e( 'Model', 'aifbp' ); ?></th><th><?php esc_html_e( 'Enabled', 'aifbp' ); ?></th><th><?php esc_html_e( 'Connection status', 'aifbp' ); ?></th><th><?php esc_html_e( 'Usage (day / month)', 'aifbp' ); ?></th><th><?php esc_html_e( 'Test', 'aifbp' ); ?></th></tr></thead>
+					<tbody>
+						<?php foreach ( $providers as $id ) : ?>
+							<?php
+							$status = AIManager::status( $id );
+							$key_id = 'openai' === $id ? 'openai_key' : ( $id . '_key' );
+							$model_id = 'openai' === $id ? 'openai_model' : ( $id . '_model' );
+							?>
+							<tr>
+								<td>
+									<strong><?php echo esc_html( ucfirst( $id ) ); ?></strong><br />
+									<span class="description"><?php echo esc_html( AIManager::free_tier_info( $id ) ); ?></span>
+								</td>
+								<td>
+									<?php if ( 'gemini' === $id ) : ?>
+										<input type="password" name="gemini_key" class="regular-text" value="" placeholder="<?php echo esc_attr( '' !== $s['gemini_key'] ? __( '(saved)', 'aifbp' ) : 'AIza…' ); ?>" autocomplete="new-password" />
+									<?php elseif ( 'custom' === $id ) : ?>
+										<input type="password" name="custom_key" class="regular-text" value="" placeholder="<?php echo esc_attr( '' !== $s['custom_key'] ? __( '(saved)', 'aifbp' ) : '' ); ?>" autocomplete="new-password" />
+									<?php else : ?>
+										<input type="password" name="<?php echo esc_attr( $key_id ); ?>" class="regular-text" value="" placeholder="<?php echo esc_attr( '' !== (string) $s[ $key_id ] ? __( '(saved)', 'aifbp' ) : '' ); ?>" autocomplete="new-password" />
+									<?php endif; ?>
+								</td>
+								<td>
+									<?php if ( 'custom' === $id ) : ?>
+										<input type="text" name="custom_model" class="regular-text" value="<?php echo esc_attr( $s['custom_model'] ); ?>" /><br />
+										<input type="url" name="custom_base" class="regular-text" value="<?php echo esc_attr( $s['custom_base'] ); ?>" placeholder="https://your-endpoint/v1" />
+									<?php elseif ( 'openai' === $id ) : ?>
+										<input type="text" name="openai_model" class="regular-text" value="<?php echo esc_attr( $s['openai_model'] ); ?>" /><br />
+										<input type="url" name="openai_base" class="regular-text" value="<?php echo esc_attr( $s['openai_base'] ); ?>" />
+									<?php else : ?>
+										<input type="text" name="<?php echo esc_attr( $model_id ); ?>" class="regular-text" value="<?php echo esc_attr( (string) $s[ $model_id ] ); ?>" />
+									<?php endif; ?>
+								</td>
+								<td><input type="checkbox" name="provider_enabled_<?php echo esc_attr( $id ); ?>" value="1" <?php checked( (int) $s[ 'provider_enabled_' . $id ], 1 ); ?> /></td>
+								<td>
+									<?php if ( empty( $status ) ) : ?>
+										<span class="description"><?php esc_html_e( 'Not tested', 'aifbp' ); ?></span>
+									<?php else : ?>
+										<span class="aifbp-status aifbp-status-<?php echo empty( $status['ok'] ) ? 'failed' : 'posted'; ?>"><?php echo esc_html( empty( $status['ok'] ) ? '✖' : '✓' ); ?> <?php echo esc_html( wp_html_excerpt( (string) $status['message'], 60, '…' ) ); ?></span><br />
+										<span class="description"><?php echo esc_html( (string) $status['tested_at'] ); ?></span>
+									<?php endif; ?>
+								</td>
+								<td><?php echo esc_html( Usage::provider_today( $id ) ); ?> / <?php echo esc_html( Usage::provider_month( $id ) ); ?></td>
+								<td>
+									<form method="post">
+										<?php wp_nonce_field( 'aifbp_settings' ); ?>
+										<input type="hidden" name="provider_id" value="<?php echo esc_attr( $id ); ?>" />
+										<button type="submit" name="aifbp_test_provider" value="1" class="button button-small"><?php esc_html_e( 'Test', 'aifbp' ); ?></button>
+									</form>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<?php wp_nonce_field( 'aifbp_settings' ); ?>
+				<button type="submit" name="aifbp_save_settings" value="1" class="button button-primary"><?php esc_html_e( 'Save provider settings', 'aifbp' ); ?></button>
+				<p class="description"><?php esc_html_e( 'Priority is fixed: Gemini → Groq → OpenRouter → Custom → OpenAI. Disable any provider you do not want used. Fallback never selects a model you have not configured.', 'aifbp' ); ?></p>
+			</div>
 
-			<h2><?php esc_html_e( 'Custom endpoint (OpenAI-compatible)', 'aifbp' ); ?></h2>
-			<table class="form-table" role="presentation">
-				<tr><th><label for="custom_base"><?php esc_html_e( 'Base URL', 'aifbp' ); ?></label></th><td><input type="url" id="custom_base" name="custom_base" class="regular-text" value="<?php echo esc_attr( $s['custom_base'] ); ?>" /></td></tr>
-				<tr><th><label for="custom_key"><?php esc_html_e( 'API key', 'aifbp' ); ?></label></th><td><input type="password" id="custom_key" name="custom_key" class="regular-text" value="" placeholder="<?php echo esc_attr( '' !== $s['custom_key'] ? __( '(saved)', 'aifbp' ) : '' ); ?>" autocomplete="new-password" /></td></tr>
-				<tr><th><label for="custom_model"><?php esc_html_e( 'Model', 'aifbp' ); ?></label></th><td><input type="text" id="custom_model" name="custom_model" class="regular-text" value="<?php echo esc_attr( $s['custom_model'] ); ?>" /></td></tr>
-			</table>
+			<div class="aifbp-grid">
+				<div class="aifbp-panel">
+					<h2><?php esc_html_e( 'Usage & cost protection', 'aifbp' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<tr><th><label for="ai_daily_limit"><?php esc_html_e( 'Daily AI request limit', 'aifbp' ); ?></label></th><td><input type="number" id="ai_daily_limit" name="ai_daily_limit" min="0" value="<?php echo esc_attr( (string) $s['ai_daily_limit'] ); ?>" /><p class="description"><?php esc_html_e( '0 = unlimited. When reached, AI generation pauses until you raise the limit.', 'aifbp' ); ?></p></td></tr>
+						<tr><th><label for="ai_monthly_limit"><?php esc_html_e( 'Monthly AI request limit', 'aifbp' ); ?></label></th><td><input type="number" id="ai_monthly_limit" name="ai_monthly_limit" min="0" value="<?php echo esc_attr( (string) $s['ai_monthly_limit'] ); ?>" /></td></tr>
+						<tr><th><label for="ai_timeout"><?php esc_html_e( 'Request timeout (seconds)', 'aifbp' ); ?></label></th><td><input type="number" id="ai_timeout" name="ai_timeout" min="10" max="300" value="<?php echo esc_attr( (string) $s['ai_timeout'] ); ?>" /></td></tr>
+						<tr><th><label for="ai_retry_limit"><?php esc_html_e( 'Retry limit per provider', 'aifbp' ); ?></label></th><td><input type="number" id="ai_retry_limit" name="ai_retry_limit" min="1" max="10" value="<?php echo esc_attr( (string) $s['ai_retry_limit'] ); ?>" /></td></tr>
+						<tr><th><?php esc_html_e( 'Usage alerts', 'aifbp' ); ?></th><td><label><input type="checkbox" name="usage_alerts" value="1" <?php checked( $s['usage_alerts'], 1 ); ?> /> <?php esc_html_e( 'Email me when a usage limit is reached', 'aifbp' ); ?></label></td></tr>
+					</table>
+					<p>
+						<?php
+						printf(
+							esc_html__( 'Today: %1$d AI requests / %2$d tokens | This month: %3$d AI requests / %4$d tokens', 'aifbp' ),
+							esc_html( Usage::today( 'ai' ) ),
+							esc_html( Usage::tokens_today() ),
+							esc_html( Usage::month()['ai'] ),
+							esc_html( Usage::tokens_month() )
+						);
+						?>
+					</p>
+				</div>
 
-			<h2><?php esc_html_e( 'Caption options', 'aifbp' ); ?></h2>
-			<table class="form-table" role="presentation">
-				<tr>
-					<th><label for="caption_language"><?php esc_html_e( 'Caption language', 'aifbp' ); ?></label></th>
-					<td>
-						<select id="caption_language" name="caption_language">
-							<option value="both" <?php selected( $s['caption_language'], 'both' ); ?>><?php esc_html_e( 'Bangla + English', 'aifbp' ); ?></option>
-							<option value="bn" <?php selected( $s['caption_language'], 'bn' ); ?>><?php esc_html_e( 'Bangla only', 'aifbp' ); ?></option>
-							<option value="en" <?php selected( $s['caption_language'], 'en' ); ?>><?php esc_html_e( 'English only', 'aifbp' ); ?></option>
-						</select>
-					</td>
-				</tr>
-				<tr><th><label for="variations"><?php esc_html_e( 'Caption variations', 'aifbp' ); ?></label></th><td><input type="number" id="variations" name="variations" min="0" max="5" value="<?php echo esc_attr( $s['variations'] ); ?>" /></td></tr>
-				<tr><th><label for="currency"><?php esc_html_e( 'Currency label', 'aifbp' ); ?></label></th><td><input type="text" id="currency" name="currency" value="<?php echo esc_attr( $s['currency'] ); ?>" /></td></tr>
-				<tr><th><?php esc_html_e( 'Include in caption', 'aifbp' ); ?></th><td>
-					<label><input type="checkbox" name="include_price" value="1" <?php checked( $s['include_price'], 1 ); ?> /> <?php esc_html_e( 'Price (regular + sale)', 'aifbp' ); ?></label><br />
-					<label><input type="checkbox" name="include_link" value="1" <?php checked( $s['include_link'], 1 ); ?> /> <?php esc_html_e( 'Product link', 'aifbp' ); ?></label><br />
-					<label><input type="checkbox" name="include_hashtags" value="1" <?php checked( $s['include_hashtags'], 1 ); ?> /> <?php esc_html_e( 'AI hashtags', 'aifbp' ); ?></label><br />
-					<label><input type="checkbox" name="include_cta" value="1" <?php checked( $s['include_cta'], 1 ); ?> /> <?php esc_html_e( 'AI call-to-action', 'aifbp' ); ?></label>
-				</td></tr>
-				<tr><th><?php esc_html_e( 'Advanced AI features', 'aifbp' ); ?></th><td>
-					<label><input type="checkbox" name="ai_image_understand" value="1" <?php checked( $s['ai_image_understand'], 1 ); ?> /> <?php esc_html_e( 'AI image understanding (vision)', 'aifbp' ); ?></label><br />
-					<label><input type="checkbox" name="ai_image_gen" value="1" <?php checked( $s['ai_image_gen'], 1 ); ?> /> <?php esc_html_e( 'AI promotional image generation (OpenAI only)', 'aifbp' ); ?></label><br />
-					<label><input type="checkbox" name="price_badge" value="1" <?php checked( $s['price_badge'], 1 ); ?> /> <?php esc_html_e( 'Automatic price badge overlay (GD)', 'aifbp' ); ?></label>
-				</td></tr>
-			</table>
+				<div class="aifbp-panel">
+					<h2><?php esc_html_e( 'AI image generation (separate provider)', 'aifbp' ); ?></h2>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th><label for="image_provider"><?php esc_html_e( 'Image provider', 'aifbp' ); ?></label></th>
+							<td>
+								<select id="image_provider" name="image_provider">
+									<option value="off" <?php selected( $s['image_provider'], 'off' ); ?>><?php esc_html_e( 'Off — use the free built-in poster designer (GD)', 'aifbp' ); ?></option>
+									<option value="openai" <?php selected( $s['image_provider'], 'openai' ); ?>><?php esc_html_e( 'OpenAI (PAID per image)', 'aifbp' ); ?></option>
+								</select>
+							</td>
+						</tr>
+						<tr><th><label for="image_model"><?php esc_html_e( 'Image model', 'aifbp' ); ?></label></th><td><input type="text" id="image_model" name="image_model" class="regular-text" value="<?php echo esc_attr( $s['image_model'] ); ?>" /></td></tr>
+						<tr><th><?php esc_html_e( 'Status', 'aifbp' ); ?></th>
+							<td>
+								<?php if ( 'off' === (string) $s['image_provider'] ) : ?>
+									<span class="aifbp-status aifbp-status-cancelled"><?php esc_html_e( 'Off — no image API charges possible', 'aifbp' ); ?></span>
+								<?php else : ?>
+									<span class="aifbp-status aifbp-status-failed"><?php esc_html_e( 'PAID API — costs apply per generated image', 'aifbp' ); ?></span>
+								<?php endif; ?>
+							</td>
+						</tr>
+						<tr><th><?php esc_html_e( 'Enable', 'aifbp' ); ?></th><td><label><input type="checkbox" name="ai_image_gen" value="1" <?php checked( $s['ai_image_gen'], 1 ); ?> /> <?php esc_html_e( 'Use AI image generation when available (poster designer otherwise)', 'aifbp' ); ?></label></td></tr>
+					</table>
+					<p class="description"><?php esc_html_e( 'A text provider (Gemini/Groq) does not provide image generation. Image generation stays off unless you explicitly enable a paid image provider here.', 'aifbp' ); ?></p>
+				</div>
+			</div>
 
-			<?php submit_button( __( 'Save AI settings', 'aifbp' ), 'primary', 'aifbp_save_settings', false ); ?>
+			<div class="aifbp-panel">
+				<h2><?php esc_html_e( 'Caption options', 'aifbp' ); ?></h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th><label for="caption_language"><?php esc_html_e( 'Caption language', 'aifbp' ); ?></label></th>
+						<td>
+							<select id="caption_language" name="caption_language">
+								<option value="both" <?php selected( $s['caption_language'], 'both' ); ?>><?php esc_html_e( 'Bangla + English', 'aifbp' ); ?></option>
+								<option value="bn" <?php selected( $s['caption_language'], 'bn' ); ?>><?php esc_html_e( 'Bangla only', 'aifbp' ); ?></option>
+								<option value="en" <?php selected( $s['caption_language'], 'en' ); ?>><?php esc_html_e( 'English only', 'aifbp' ); ?></option>
+							</select>
+						</td>
+					</tr>
+					<tr><th><label for="variations"><?php esc_html_e( 'Caption variations', 'aifbp' ); ?></label></th><td><input type="number" id="variations" name="variations" min="0" max="5" value="<?php echo esc_attr( (string) $s['variations'] ); ?>" /></td></tr>
+					<tr><th><label for="currency"><?php esc_html_e( 'Currency label', 'aifbp' ); ?></label></th><td><input type="text" id="currency" name="currency" value="<?php echo esc_attr( $s['currency'] ); ?>" /></td></tr>
+					<tr><th><?php esc_html_e( 'Include in caption', 'aifbp' ); ?></th><td>
+						<label><input type="checkbox" name="include_price" value="1" <?php checked( $s['include_price'], 1 ); ?> /> <?php esc_html_e( 'Price (regular + sale)', 'aifbp' ); ?></label><br />
+						<label><input type="checkbox" name="include_link" value="1" <?php checked( $s['include_link'], 1 ); ?> /> <?php esc_html_e( 'Product link', 'aifbp' ); ?></label><br />
+						<label><input type="checkbox" name="include_hashtags" value="1" <?php checked( $s['include_hashtags'], 1 ); ?> /> <?php esc_html_e( 'AI hashtags', 'aifbp' ); ?></label><br />
+						<label><input type="checkbox" name="include_cta" value="1" <?php checked( $s['include_cta'], 1 ); ?> /> <?php esc_html_e( 'AI call-to-action', 'aifbp' ); ?></label>
+					</td></tr>
+					<tr><th><?php esc_html_e( 'Advanced AI features', 'aifbp' ); ?></th><td>
+						<label><input type="checkbox" name="ai_image_understand" value="1" <?php checked( $s['ai_image_understand'], 1 ); ?> /> <?php esc_html_e( 'AI image understanding (vision)', 'aifbp' ); ?></label><br />
+						<label><input type="checkbox" name="price_badge" value="1" <?php checked( $s['price_badge'], 1 ); ?> /> <?php esc_html_e( 'Automatic price badge overlay (GD)', 'aifbp' ); ?></label>
+					</td></tr>
+				</table>
+				<button type="submit" name="aifbp_save_settings" value="1" class="button button-primary"><?php esc_html_e( 'Save AI settings', 'aifbp' ); ?></button>
+			</div>
 		</form>
+
+		<div class="aifbp-panel">
+			<h2><?php esc_html_e( 'Recent AI errors', 'aifbp' ); ?></h2>
+			<?php
+			$logs = array_filter(
+				Logger::recent( 100 ),
+				fn( $l ) => str_starts_with( (string) $l['context'], 'ai' ) && 'error' === (string) $l['level']
+			);
+			$logs = array_slice( $logs, 0, 10 );
+
+			if ( empty( $logs ) ) {
+				echo '<p class="description">' . esc_html__( 'No AI errors logged.', 'aifbp' ) . '</p>';
+			} else {
+				echo '<table class="widefat striped"><thead><tr><th>' . esc_html__( 'Time', 'aifbp' ) . '</th><th>' . esc_html__( 'Context', 'aifbp' ) . '</th><th>' . esc_html__( 'Message', 'aifbp' ) . '</th></tr></thead><tbody>';
+				foreach ( $logs as $log ) {
+					echo '<tr><td>' . esc_html( (string) $log['created_at'] ) . '</td><td>' . esc_html( (string) $log['context'] ) . '</td><td>' . esc_html( wp_html_excerpt( (string) $log['message'], 140, '…' ) ) . '</td></tr>';
+				}
+				echo '</tbody></table>';
+			}
+			?>
+		</div>
 		<?php
 	}
 

@@ -4,6 +4,7 @@ namespace AIFB\AI;
 
 use AIFB\Utils\Usage;
 use AIFB\Utils\Logger;
+use AIFB\Utils\Settings;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -35,11 +36,12 @@ final class OpenAIProvider extends AbstractProvider {
 
 	protected function chat( array $messages, float $temperature = 0.8 ): array|\WP_Error {
 		Usage::track( 'ai' );
+		Usage::track_provider( $this->id() );
 
 		$response = wp_remote_post(
 			$this->endpoint( '/chat/completions' ),
 			[
-				'timeout' => 90,
+				'timeout' => max( 10, (int) Settings::get( 'ai_timeout' ) ),
 				'headers' => [
 					'Authorization' => 'Bearer ' . $this->key,
 					'Content-Type'  => 'application/json',
@@ -62,19 +64,36 @@ final class OpenAIProvider extends AbstractProvider {
 		$code = (int) wp_remote_retrieve_response_code( $response );
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 
+		if ( 429 === $code ) {
+			$message = (string) ( $body['error']['message'] ?? 'Rate limit reached.' );
+			Logger::warning( 'ai_' . $this->id(), 'Rate limited: ' . $message );
+
+			return $this->rate_limited( wp_remote_retrieve_header( $response, 'retry-after' ), $message );
+		}
+
 		if ( isset( $body['error']['message'] ) ) {
 			$message = (string) $body['error']['message'];
-			Logger::error( 'ai_openai', $message );
+			Logger::error( 'ai_' . $this->id(), $message );
 			return new \WP_Error( 'aifbp_ai', $message );
 		}
 
 		if ( 200 !== $code || ! isset( $body['choices'][0]['message']['content'] ) ) {
-			$message = sprintf( 'OpenAI API HTTP %d', $code );
-			Logger::error( 'ai_openai', $message );
+			$message = sprintf( '%s API HTTP %d', $this->id(), $code );
+			Logger::error( 'ai_' . $this->id(), $message );
 			return new \WP_Error( 'aifbp_ai', $message );
 		}
 
+		Usage::track_tokens( (int) ( $body['usage']['total_tokens'] ?? 0 ) );
+
 		return $body;
+	}
+
+	protected function rate_limited( $retry_after, string $message ): \WP_Error {
+		$seconds = max( 60, min( 3600, (int) ( is_numeric( $retry_after ) ? (float) $retry_after : 300 ) ) );
+
+		set_transient( 'aifbp_rl_' . $this->id(), time() + $seconds, $seconds );
+
+		return new \WP_Error( 'aifbp_ai_ratelimit', sprintf( 'Rate limited (retry after %ds): %s', $seconds, $message ) );
 	}
 
 	public function ask( string $system, string $user, float $temperature = 0.5 ): string|\WP_Error {
@@ -177,7 +196,7 @@ final class OpenAIProvider extends AbstractProvider {
 				],
 				'body'    => wp_json_encode(
 					[
-						'model'  => 'dall-e-3',
+						'model'  => (string) ( Settings::get( 'image_model' ) ?: 'gpt-image-1' ),
 						'prompt' => $prompt,
 						'n'      => 1,
 						'size'   => '1024x1024',

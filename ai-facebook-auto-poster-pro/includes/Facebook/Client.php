@@ -139,6 +139,12 @@ final class Client {
 				return new \WP_Error( 'aifbp_fb_ratelimit', $message );
 			}
 
+			if ( in_array( $fb_code, [ 190, 102, 10 ], true ) ) {
+				\AIFB\Facebook\OAuth::flag_auth_invalid( $message );
+
+				return new \WP_Error( 'aifbp_fb_auth', 'Facebook authorization invalid: ' . $message . ' — reconnect on the Facebook Connection tab.' );
+			}
+
 			return new \WP_Error( 'aifbp_fb', $message );
 		}
 

@@ -72,6 +72,17 @@ final class Processor {
 	}
 
 	public static function tick( int $limit = 5 ): int {
+		$auth_notice = \AIFB\Facebook\OAuth::auth_notice();
+
+		if ( '' !== $auth_notice ) {
+			if ( ! get_transient( 'aifbp_auth_paused_logged' ) ) {
+				Logger::warning( 'queue', 'Posting paused: ' . $auth_notice . ' Reconnect Facebook on the Connection tab to resume.' );
+				set_transient( 'aifbp_auth_paused_logged', 1, HOUR_IN_SECONDS );
+			}
+
+			return 0;
+		}
+
 		if ( ! QueueManager::acquire_lock() ) {
 			Logger::info( 'queue', 'Queue processing skipped: another process holds the lock.' );
 

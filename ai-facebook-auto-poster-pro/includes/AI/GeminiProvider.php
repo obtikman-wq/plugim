@@ -32,6 +32,7 @@ final class GeminiProvider extends AbstractProvider {
 
 	private function generate( array $parts, float $temperature = 0.8, bool $json_mode = true ): array|\WP_Error {
 		Usage::track( 'ai' );
+		Usage::track_provider( 'gemini' );
 
 		$body = [
 			'contents'         => [ [ 'parts' => $parts ] ],
@@ -47,7 +48,7 @@ final class GeminiProvider extends AbstractProvider {
 		$response = wp_remote_post(
 			sprintf( '%s/models/%s:generateContent?key=%s', self::BASE, rawurlencode( $this->model ), rawurlencode( $this->key ) ),
 			[
-				'timeout' => 90,
+				'timeout' => max( 10, (int) \AIFB\Utils\Settings::get( 'ai_timeout' ) ),
 				'headers' => [ 'Content-Type' => 'application/json' ],
 				'body'    => wp_json_encode( $body ),
 			]
@@ -60,6 +61,16 @@ final class GeminiProvider extends AbstractProvider {
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
 		$data = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		if ( 429 === $code ) {
+			$message = (string) ( $data['error']['message'] ?? 'Gemini free quota reached.' );
+			Logger::warning( 'ai_gemini', 'Rate limited: ' . $message );
+
+			$retry = max( 60, min( 3600, (int) ( is_numeric( wp_remote_retrieve_header( $response, 'retry-after' ) ) ? (float) wp_remote_retrieve_header( $response, 'retry-after' ) : 300 ) ) );
+			set_transient( 'aifbp_rl_gemini', time() + $retry, $retry );
+
+			return new \WP_Error( 'aifbp_ai_ratelimit', sprintf( 'Gemini rate limited (retry after %ds): %s', $retry, $message ) );
+		}
 
 		if ( isset( $data['error']['message'] ) ) {
 			$message = (string) $data['error']['message'];
@@ -74,6 +85,8 @@ final class GeminiProvider extends AbstractProvider {
 			Logger::error( 'ai_gemini', $message );
 			return new \WP_Error( 'aifbp_ai', $message );
 		}
+
+		Usage::track_tokens( (int) ( $data['usageMetadata']['totalTokenCount'] ?? 0 ) );
 
 		return [ 'text' => (string) $text ];
 	}

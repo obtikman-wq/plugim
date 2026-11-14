@@ -78,7 +78,8 @@ final class RestController {
 					$pages = Settings::pages();
 
 					if ( '' === $page_id ) {
-						$page_id = (string) array_key_first( $pages );
+						$default = (string) Settings::get( 'default_page' );
+					$page_id = '' !== $default && isset( $pages[ $default ] ) ? $default : (string) array_key_first( $pages );
 					}
 
 					if ( '' === $page_id || ! isset( $pages[ $page_id ] ) ) {

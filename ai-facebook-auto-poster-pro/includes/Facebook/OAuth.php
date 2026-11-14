@@ -147,6 +147,8 @@ final class OAuth {
 
 		Logger::success( 'oauth', sprintf( 'Connected %d Facebook page(s).', count( $pages ) ) );
 
+		self::clear_auth_flag();
+
 		wp_safe_redirect( add_query_arg( 'aifbp_msg', rawurlencode( sprintf( 'Connected %d page(s).', count( $pages ) ) ), $back ) );
 		exit;
 	}
@@ -196,6 +198,57 @@ final class OAuth {
 	public static function token_expiry(): int {
 		$stored = get_option( 'aifbp_oauth_token', [] );
 		return is_array( $stored ) ? (int) ( $stored['expires'] ?? 0 ) : 0;
+	}
+
+	public static function flag_auth_invalid( string $reason = '' ): void {
+		update_option( 'aifbp_auth_invalid', $reason ?: 'Facebook authorization is invalid.', false );
+	}
+
+	public static function auth_notice(): string {
+		return (string) get_option( 'aifbp_auth_invalid', '' );
+	}
+
+	public static function clear_auth_flag(): void {
+		delete_option( 'aifbp_auth_invalid' );
+	}
+
+	public static function granted_permissions(): array|\WP_Error {
+		$token = self::user_token();
+
+		if ( '' === $token ) {
+			return new \WP_Error( 'aifbp_oauth', __( 'Not connected.', 'aifbp' ) );
+		}
+
+		Usage::track( 'fb' );
+
+		$response = wp_remote_get(
+			'https://graph.facebook.com/' . self::GRAPH_VERSION . '/me/permissions',
+			[ 'timeout' => 30, 'body' => [ 'access_token' => $token ] ]
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		if ( isset( $body['error']['message'] ) ) {
+			return new \WP_Error( 'aifbp_oauth', (string) $body['error']['message'] );
+		}
+
+		$granted = [];
+
+		foreach ( (array) ( $body['data'] ?? [] ) as $row ) {
+			if ( ( $row['status'] ?? '' ) === 'granted' && ! empty( $row['permission'] ) ) {
+				$granted[] = (string) $row['permission'];
+			}
+		}
+
+		return $granted;
+	}
+
+	public static function is_valid(): bool {
+		return is_array( self::granted_permissions() );
 	}
 
 	public static function disconnect(): void {
