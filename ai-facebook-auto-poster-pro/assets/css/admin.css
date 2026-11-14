@@ -1,0 +1,79 @@
+.aifbp-wrap { max-width: 1200px; }
+.aifbp-title { display: flex; align-items: center; gap: 10px; }
+
+.aifbp-tabs { margin-bottom: 0; }
+
+.aifbp-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+}
+.aifbp-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.aifbp-card-num { font-size: 26px; font-weight: 700; color: #1d2327; }
+
+.aifbp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 900px) { .aifbp-grid { grid-template-columns: 1fr; } }
+
+.aifbp-panel {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 14px 0;
+}
+
+.aifbp-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 140px;
+    padding: 8px 0;
+}
+.aifbp-bar {
+    flex: 1;
+    min-width: 6px;
+    background: linear-gradient(180deg, #4f7df9, #2271b1);
+    border-radius: 3px 3px 0 0;
+}
+
+.aifbp-preview { margin-top: 12px; }
+.aifbp-fbpost {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 10px;
+    padding: 16px;
+    max-width: 640px;
+}
+.aifbp-fbimg img { width: 180px; height: 180px; object-fit: cover; border-radius: 8px; }
+.aifbp-fbcaption pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: inherit;
+    margin: 0;
+}
+
+.aifbp-result { margin-top: 10px; }
+.aifbp-result .aifbp-ok { color: #00a32a; font-weight: 600; }
+.aifbp-result .aifbp-err { color: #d63638; font-weight: 600; }
+
+.aifbp-status { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+.aifbp-status-posted { background: #edfaef; color: #00a32a; }
+.aifbp-status-pending { background: #f0f6fc; color: #2271b1; }
+.aifbp-status-processing { background: #fcf0f1; color: #d63638; }
+.aifbp-status-failed { background: #fcf0f1; color: #d63638; }
+.aifbp-status-cancelled { background: #f0f0f1; color: #646970; }
+
+.aifbp-fade { animation: aifbp-fade-in .4s ease; }
+@keyframes aifbp-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
