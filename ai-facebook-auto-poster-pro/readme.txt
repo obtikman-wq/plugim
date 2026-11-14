@@ -4,7 +4,7 @@ Tags: facebook, woocommerce, auto post, ai, scheduler, marketing
 Requires at least: 6.2
 Tested up to: 6.7
 Requires PHP: 8.1
-Stable tag: 3.1.0
+Stable tag: 3.1.1
 License: GPL-2.0-or-later
 
 AI-powered Facebook marketing automation platform for WooCommerce: scheduled posting with AI or completely without AI (Direct Mode), product rotation, comment and Messenger assistants, poster designer, marketing calendar, best-time recommendations, and analytics.
@@ -48,6 +48,11 @@ AI-powered Facebook marketing automation platform for WooCommerce: scheduled pos
 * Action Scheduler (bundled with WooCommerce) or a real cron job for reliable scheduling.
 
 == Changelog ==
+
+= 3.1.1 =
+* New: WhatsApp Support button in the admin dashboard footer (opens wa.me chat, official green style, responsive).
+* New: "Made by Ta Organization" footer credit shown on every plugin admin tab (plugin dashboard only, never on the frontend).
+
 
 = 3.1.0 =
 * New: Multi-provider AI system with free-tier priority — Gemini → Groq → OpenRouter → Custom → OpenAI.

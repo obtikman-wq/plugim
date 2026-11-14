@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.1 — Admin footer: WhatsApp support + credit
+
+- **WhatsApp Support button** in the plugin admin dashboard footer — official-style green gradient button with WhatsApp icon, opens `https://wa.me/8801618576564` in a new tab, fully responsive (mobile/desktop).
+- **"Made by Ta Organization" footer credit** displayed on every plugin admin tab.
+- Both render only inside the plugin's own admin dashboard (capability-checked, escaped, external link via `esc_url` with `rel="noopener noreferrer"`) — never on the frontend, and they do not interfere with other admin UI or plugins.
+
 ## 3.1.0 — Multi-Provider Free-Tier AI + Centralized Facebook Authentication
 
 ### New: multi-provider AI system

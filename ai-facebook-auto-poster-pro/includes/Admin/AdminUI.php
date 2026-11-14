@@ -728,6 +728,30 @@ final class AdminUI {
 				}
 				?>
 			</div>
+
+			<?php $this->footer(); ?>
+		</div>
+		<?php
+	}
+
+	private function footer(): void {
+		$wa_url = 'https://wa.me/8801618576564';
+		?>
+		<div class="aifbp-footer">
+			<div class="aifbp-footer-support">
+				<span class="aifbp-footer-label"><?php esc_html_e( 'Need help?', 'aifbp' ); ?></span>
+				<a class="aifbp-wa-btn" href="<?php echo esc_url( $wa_url ); ?>" target="_blank" rel="noopener noreferrer">
+					<svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M16.04 3C9.02 3 3.32 8.7 3.32 15.72c0 2.24.59 4.42 1.7 6.35L3.2 29l7.09-1.86a12.7 12.7 0 0 0 5.75 1.38h.01c7.01 0 12.72-5.7 12.72-12.72C28.77 8.7 23.06 3 16.04 3Zm0 23.28c-1.9 0-3.76-.51-5.38-1.48l-.39-.23-4.02 1.05 1.07-3.92-.25-.4a10.55 10.55 0 0 1-1.62-5.58c0-5.83 4.75-10.58 10.6-10.58 2.83 0 5.48 1.1 7.48 3.1a10.5 10.5 0 0 1 3.1 7.49c0 5.84-4.76 10.55-10.59 10.55Zm5.8-7.92c-.32-.16-1.98-.98-2.29-1.09-.31-.11-.53-.17-.75.16-.22.32-.86 1.09-1.06 1.31-.19.22-.39.25-.71.08-.32-.16-1.35-.5-2.57-1.59a9.66 9.66 0 0 1-1.78-2.22c-.19-.32-.02-.5.14-.66.15-.14.32-.37.48-.56.16-.19.22-.32.32-.54.11-.22.05-.41-.03-.57-.08-.16-.72-1.82-1-2.49-.26-.65-.53-.56-.72-.57h-.64c-.22 0-.58.08-.88.4-.3.32-1.15 1.13-1.15 2.75 0 1.62 1.18 3.19 1.34 3.41.16.22 2.29 3.5 5.55 4.9.78.34 1.38.54 1.85.69.79.25 1.5.21 2.07.13.63-.09 1.98-.81 2.26-1.59.28-.78.28-1.45.2-1.59-.08-.14-.29-.22-.61-.38Z"/></svg>
+					<?php esc_html_e( 'WhatsApp Support', 'aifbp' ); ?>
+				</a>
+			</div>
+			<p class="aifbp-footer-credit">
+				<?php
+				printf(
+					wp_kses_post( __( 'Made by <strong>Ta Organization</strong>', 'aifbp' ) )
+				);
+				?>
+			</p>
 		</div>
 		<?php
 	}
