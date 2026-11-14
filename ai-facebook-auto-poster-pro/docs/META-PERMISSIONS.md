@@ -44,4 +44,4 @@ The plugin **never** asks for personal-profile posting, never touches user passw
 
 ## 6. API versions
 
-The plugin calls **Graph API v21.0** endpoints (`/me/accounts`, `/{page-id}/photos`, `/{page-id}/feed`, `/{post-id}/insights`, `/{comment-id}/comments`, `/me/messages`). Update the version constant in `includes/Facebook/Client.php` when Meta deprecates versions.
+The plugin calls **Graph API v23.0** endpoints (`/me/accounts`, `/{page-id}/photos`, `/{page-id}/feed`, `/{post-id}/insights`, `/{comment-id}/comments`, `/me/messages`). Update the version constant in `includes/Facebook/Client.php` when Meta deprecates versions.

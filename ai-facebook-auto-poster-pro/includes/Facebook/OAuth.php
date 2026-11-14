@@ -13,8 +13,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class OAuth {
 
-	const GRAPH_VERSION = 'v21.0';
-	const SCOPES        = 'pages_show_list,pages_manage_posts,pages_read_engagement,business_management';
+	const GRAPH_VERSION = 'v23.0';
+	const SCOPES        = 'pages_show_list,pages_manage_posts,pages_read_engagement,pages_manage_engagement,pages_read_user_content,pages_messaging,pages_manage_metadata,business_management';
 
 	public static function redirect_uri(): string {
 		return add_query_arg( 'action', 'aifbp_oauth_callback', admin_url( 'admin-post.php' ) );

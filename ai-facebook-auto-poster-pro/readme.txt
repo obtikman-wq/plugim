@@ -4,7 +4,7 @@ Tags: facebook, woocommerce, auto post, ai, scheduler, marketing
 Requires at least: 6.2
 Tested up to: 6.7
 Requires PHP: 8.1
-Stable tag: 3.1.1
+Stable tag: 3.1.2
 License: GPL-2.0-or-later
 
 AI-powered Facebook marketing automation platform for WooCommerce: scheduled posting with AI or completely without AI (Direct Mode), product rotation, comment and Messenger assistants, poster designer, marketing calendar, best-time recommendations, and analytics.
@@ -13,7 +13,7 @@ AI-powered Facebook marketing automation platform for WooCommerce: scheduled pos
 
 * Two independent posting engines: **AI Mode** (OpenAI / Gemini / custom OpenAI-compatible API) and **Direct Mode** built purely from live WooCommerce product data — no AI API required. Both Mode runs both engines with separate schedules; if AI fails, Direct keeps posting.
 * Direct content formats: short description, long description, short+long, name+description+price, name+image+price+link, or a custom template with variables ({product_name}, {regular_price}, {sale_price}, {discount_percent}, {product_url}, {stock_status}, {sku}, {category}, {hashtags}, {cta}, …).
-* Facebook OAuth (official Graph API v21.0): automatic page discovery with profile images, multi-select pages, encrypted page tokens (AES-256-GCM), token expiry monitoring, refresh/reconnect/disconnect.
+* Facebook OAuth (official Graph API v23.0): automatic page discovery with profile images, multi-select pages, encrypted page tokens (AES-256-GCM), token expiry monitoring, refresh/reconnect/disconnect.
 * Advanced scheduler: fixed times, multiple times per day, weekly days, random time windows, campaigns, bulk scheduling, per-schedule pages/categories/selection/mode/template, pause/resume, queue locking, retry with backoff, cron health display.
 * Product rotation: random, latest, best selling, sale first, featured, category based, manual — with repeat prevention, out-of-stock skipping, and per-page history.
 * AI Comment Assistant + Messenger Inbox Assistant: webhooks (X-Hub-Signature-256 verified) or polling, intent detection, WooCommerce product matching, auto or approval-based replies, human handoff. Never claims an order or payment is confirmed.
@@ -48,6 +48,12 @@ AI-powered Facebook marketing automation platform for WooCommerce: scheduled pos
 * Action Scheduler (bundled with WooCommerce) or a real cron job for reliable scheduling.
 
 == Changelog ==
+
+= 3.1.2 =
+* Fix: PHP fatal error in AdminUI.php (closure parameter and use-clause shared the same variable) — plugin now loads cleanly.
+* Fix: OAuth scope list now requests pages_manage_engagement, pages_read_user_content, pages_messaging and pages_manage_metadata so the Comment Assistant, Inbox Assistant and webhooks can work after authorization.
+* Change: Graph API updated from v21.0 to v23.0 (v23.0 supported until October 2027; v24.0 avoided due to messaging webhook breaking changes).
+
 
 = 3.1.1 =
 * New: WhatsApp Support button in the admin dashboard footer (opens wa.me chat, official green style, responsive).

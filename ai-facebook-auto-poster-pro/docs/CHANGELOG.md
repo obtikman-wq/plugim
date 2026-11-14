@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.2 — Critical fixes (external review)
+
+- **Fix (critical):** PHP fatal error in `includes/Admin/AdminUI.php` — the `$redirect` closure declared `$tab` both as a parameter and in the `use` clause ("Cannot use lexical variable as a parameter name"). The `use ($tab)` clause was removed; the parameter is used. The plugin now loads without fatal errors.
+- **Fix:** OAuth scopes now include the permissions the features actually need: `pages_manage_engagement` (comment replies), `pages_read_user_content` (reading comments), `pages_messaging` (Messenger inbox) and `pages_manage_metadata` (webhook subscriptions). Previously only `pages_show_list, pages_manage_posts, pages_read_engagement, business_management` were requested, which would have blocked the assistants after authorization.
+- **Change:** Graph API bumped from **v21.0 → v23.0** (supported until October 8, 2027). v24.0 was deliberately skipped because it removes the `conversation` object from message-status webhooks, which would break the Inbox Assistant.
+- Re-scanned every closure in the codebase for the same parameter/`use` conflict: no other occurrences.
+
 ## 3.1.1 — Admin footer: WhatsApp support + credit
 
 - **WhatsApp Support button** in the plugin admin dashboard footer — official-style green gradient button with WhatsApp icon, opens `https://wa.me/8801618576564` in a new tab, fully responsive (mobile/desktop).

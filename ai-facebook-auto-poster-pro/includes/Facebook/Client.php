@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class Client {
 
-	const GRAPH = 'https://graph.facebook.com/v21.0/';
+	const GRAPH = 'https://graph.facebook.com/v23.0/';
 
 	public static function fetch_pages( string $user_token ) {
 		$body = self::get( 'me/accounts', [ 'fields' => 'id,name,access_token,picture{url},tasks', 'limit' => 100 ], $user_token );

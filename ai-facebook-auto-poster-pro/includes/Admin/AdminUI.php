@@ -189,7 +189,7 @@ final class AdminUI {
 
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'dashboard';
 
-		$redirect = static function ( string $tab, string $msg = '' ) use ( $tab ): never {
+		$redirect = static function ( string $tab, string $msg = '' ): never {
 			$args = [ 'page' => self::PAGE, 'tab' => $tab ];
 
 			if ( '' !== $msg ) {
