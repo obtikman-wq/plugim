@@ -77,6 +77,22 @@ final class OpenAIProvider extends AbstractProvider {
 		return $body;
 	}
 
+	public function ask( string $system, string $user, float $temperature = 0.5 ): string|\WP_Error {
+		$result = $this->chat(
+			[
+				[ 'role' => 'system', 'content' => $system ],
+				[ 'role' => 'user', 'content' => $user ],
+			],
+			$temperature
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return trim( (string) ( $result['choices'][0]['message']['content'] ?? '' ) );
+	}
+
 	public function captions( array $product, array $options ): array|\WP_Error {
 		$response = $this->chat(
 			[

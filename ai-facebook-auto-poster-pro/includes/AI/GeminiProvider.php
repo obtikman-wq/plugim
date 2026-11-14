@@ -78,6 +78,16 @@ final class GeminiProvider extends AbstractProvider {
 		return [ 'text' => (string) $text ];
 	}
 
+	public function ask( string $system, string $user, float $temperature = 0.5 ): string|\WP_Error {
+		$result = $this->generate( [ [ 'text' => $system . "\n\n" . $user ] ], $temperature, false );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return trim( (string) $result['text'] );
+	}
+
 	public function captions( array $product, array $options ): array|\WP_Error {
 		$response = $this->generate(
 			[

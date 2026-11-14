@@ -137,6 +137,7 @@ final class OAuth {
 			$stored[ $page['id'] ] = [
 				'id'           => $page['id'],
 				'name'         => $page['name'],
+				'picture'      => (string) ( $page['picture'] ?? '' ),
 				'token'        => Crypto::encrypt( $page['access_token'] ),
 				'connected_at' => time(),
 			];
@@ -148,6 +149,38 @@ final class OAuth {
 
 		wp_safe_redirect( add_query_arg( 'aifbp_msg', rawurlencode( sprintf( 'Connected %d page(s).', count( $pages ) ) ), $back ) );
 		exit;
+	}
+
+	public static function refresh_pages(): int|\WP_Error {
+		$token = self::user_token();
+
+		if ( '' === $token ) {
+			return new \WP_Error( 'aifbp_oauth', __( 'Facebook is not connected. Connect your account first.', 'aifbp' ) );
+		}
+
+		Usage::track( 'fb' );
+
+		$pages = Client::fetch_pages( $token );
+
+		if ( is_wp_error( $pages ) ) {
+			return $pages;
+		}
+
+		$stored = Settings::pages();
+
+		foreach ( $pages as $page ) {
+			$stored[ $page['id'] ] = [
+				'id'           => $page['id'],
+				'name'         => $page['name'],
+				'picture'      => (string) ( $page['picture'] ?? '' ),
+				'token'        => Crypto::encrypt( $page['access_token'] ),
+				'connected_at' => (int) ( $stored[ $page['id'] ]['connected_at'] ?? time() ),
+			];
+		}
+
+		Settings::save_pages( $stored );
+
+		return count( $pages );
 	}
 
 	public static function user_token(): string {

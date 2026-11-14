@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: AI Facebook Product Auto Poster Pro
- * Description: Automatically posts WooCommerce products to Facebook Pages with AI-generated Bangla/English captions, hashtags, CTA, scheduling, queue, retries and analytics.
- * Version: 2.0.0
+ * Description: AI + Direct Facebook marketing automation for WooCommerce: scheduled posting with or without AI, rotation, comment and inbox assistants, poster designer, calendar and analytics.
+ * Version: 3.0.0
  * Requires at least: 6.2
  * Requires PHP: 8.1
  * Author: AI Facebook Auto Poster Pro
@@ -16,8 +16,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AIFB_VERSION', '2.0.0' );
-define( 'AIFB_DB_VERSION', '2' );
+define( 'AIFB_VERSION', '3.0.0' );
+define( 'AIFB_DB_VERSION', '3' );
 define( 'AIFB_FILE', __FILE__ );
 define( 'AIFB_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AIFB_URL', plugin_dir_url( __FILE__ ) );

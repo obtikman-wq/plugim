@@ -31,6 +31,10 @@ final class Templates {
 		return $items;
 	}
 
+	public static function template_body( string $name ): string {
+		return (string) ( self::all()[ $name ] ?? '' );
+	}
+
 	public static function apply( string $name, array $product, array $captions ): string|\WP_Error {
 		$templates = self::all();
 

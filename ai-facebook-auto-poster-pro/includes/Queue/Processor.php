@@ -4,7 +4,9 @@ namespace AIFB\Queue;
 
 use AIFB\AI\Manager as AIManager;
 use AIFB\AI\PriceBadge;
+use AIFB\Direct\Engine as DirectEngine;
 use AIFB\Facebook\Client;
+use AIFB\Product\Rotation;
 use AIFB\Utils\Settings;
 use AIFB\Utils\Logger;
 
@@ -70,12 +72,22 @@ final class Processor {
 	}
 
 	public static function tick( int $limit = 5 ): int {
-		$items = QueueManager::claim_due( $limit );
-		$done  = 0;
+		if ( ! QueueManager::acquire_lock() ) {
+			Logger::info( 'queue', 'Queue processing skipped: another process holds the lock.' );
 
-		foreach ( $items as $item ) {
-			self::process_item( $item );
-			$done++;
+			return 0;
+		}
+
+		try {
+			$items = QueueManager::claim_due( $limit );
+			$done  = 0;
+
+			foreach ( $items as $item ) {
+				self::process_item( $item );
+				$done++;
+			}
+		} finally {
+			QueueManager::release_lock();
 		}
 
 		return $done;
@@ -95,7 +107,22 @@ final class Processor {
 		$meta = json_decode( (string) ( $item['meta'] ?? '{}' ), true );
 		$meta = is_array( $meta ) ? $meta : [];
 
-		$product = \AIFB\Product\Picker::random_product( (int) $item['product_id'] );
+		$mode = (string) ( $item['mode'] ?? 'ai' );
+
+		if ( ! in_array( $mode, [ 'ai', 'direct' ], true ) ) {
+			$mode = 'ai';
+		}
+
+		$product = Rotation::pick(
+			[
+				'selection'         => 'manual',
+				'product_id'        => (int) $item['product_id'],
+				'page_id'           => $page_id,
+				'schedule_id'       => (int) ( $meta['schedule_id'] ?? 0 ),
+				'mode'              => $mode,
+				'skip_out_of_stock' => 0,
+			]
+		);
 
 		if ( is_wp_error( $product ) ) {
 			QueueManager::mark_failed( (int) $item['id'], $product->get_error_message(), (int) $item['attempts'] );
@@ -103,12 +130,101 @@ final class Processor {
 			return false;
 		}
 
+		$captured = self::build_caption( $product, $mode, $meta );
+
+		if ( is_wp_error( $captured ) ) {
+			QueueManager::mark_failed( (int) $item['id'], $captured->get_error_message(), (int) $item['attempts'] );
+
+			return false;
+		}
+
+		$caption = $captured['caption'];
+		$used    = $captured['mode'];
+
+		if ( '' !== trim( (string) ( $meta['caption_override'] ?? '' ) ) ) {
+			$caption = (string) $meta['caption_override'];
+		}
+
+		$image_url = (string) ( $item['image_url'] ?: $product['image_url'] );
+
+		if ( ! empty( $meta['image_override'] ) ) {
+			$image_url = (string) $meta['image_override'];
+		}
+
+		$poster = self::maybe_poster( $product, $mode, $meta );
+
+		if ( '' !== $poster ) {
+			$image_url = $poster;
+		}
+
+		if ( ! empty( Settings::get( 'ai_image_gen' ) ) && 'ai' === $mode && '' === $poster ) {
+			$generated = AIManager::generate_promo_image( $product );
+
+			if ( ! is_wp_error( $generated ) ) {
+				$image_url = $generated;
+			}
+		}
+
+		if ( ! empty( Settings::get( 'price_badge' ) ) && '' !== $image_url && '' === $poster ) {
+			$badged = PriceBadge::apply( $image_url, $product );
+
+			if ( ! is_wp_error( $badged ) ) {
+				$image_url = $badged;
+			}
+		}
+
+		$link = (string) ( $product['url'] ?? '' );
+
+		if ( '' !== $image_url ) {
+			$result = Client::post_photo( $page_id, $token, $image_url, $caption );
+		} else {
+			$result = Client::post_feed( $page_id, $token, $caption, $link );
+		}
+
+		if ( is_wp_error( $result ) ) {
+			if ( 'ai' === $mode && ! empty( Settings::get( 'ai_fallback_direct' ) ) && self::is_ai_error( $result ) ) {
+				$direct = self::try_direct_fallback( $product, $page_id, $token, $item, $meta );
+
+				if ( true === $direct ) {
+					return true;
+				}
+			}
+
+			QueueManager::mark_failed( (int) $item['id'], $result->get_error_message(), (int) $item['attempts'] );
+
+			return false;
+		}
+
+		return self::finish( $item, $product, $page_id, $used, $result['post_id'], $caption );
+	}
+
+	private static function build_caption( array $product, string $mode, array $meta ): array|\WP_Error {
+		if ( 'direct' === $mode ) {
+			$caption = DirectEngine::build(
+				$product,
+				(string) ( $meta['direct_format'] ?? null ),
+				(string) ( $meta['direct_template'] ?? null )
+			);
+
+			if ( '' === trim( $caption ) ) {
+				return new \WP_Error( 'aifbp_direct_empty', __( 'Direct engine produced an empty caption. Check the product description or template.', 'aifbp' ) );
+			}
+
+			return [ 'caption' => $caption, 'mode' => 'direct' ];
+		}
+
 		$captions = AIManager::captions( $product );
 
 		if ( is_wp_error( $captions ) ) {
-			QueueManager::mark_failed( (int) $item['id'], 'AI: ' . $captions->get_error_message(), (int) $item['attempts'] );
+			if ( ! empty( Settings::get( 'ai_fallback_direct' ) ) ) {
+				$caption = DirectEngine::build( $product, (string) ( $meta['direct_format'] ?? null ), (string) ( $meta['direct_template'] ?? null ) );
 
-			return false;
+				if ( '' !== trim( $caption ) ) {
+					return [ 'caption' => $caption, 'mode' => 'direct' ];
+				}
+			}
+
+			return new \WP_Error( 'aifbp_ai', 'AI: ' . $captions->get_error_message() );
 		}
 
 		$variation = (string) ( $meta['variation'] ?? '' );
@@ -124,48 +240,86 @@ final class Processor {
 			$caption = AIManager::compose( $captions, $product, null, $variation );
 		}
 
+		return [ 'caption' => $caption, 'mode' => 'ai' ];
+	}
+
+	private static function is_ai_error( \WP_Error $error ): bool {
+		$code = (string) $error->get_error_code();
+
+		return str_starts_with( $code, 'aifbp_ai' ) || str_contains( $code, 'ai' ) || str_contains( $code, 'openai' ) || str_contains( $code, 'gemini' );
+	}
+
+	private static function try_direct_fallback( array $product, string $page_id, string $token, array $item, array $meta ): bool {
+		$caption = DirectEngine::build( $product, (string) ( $meta['direct_format'] ?? null ), (string) ( $meta['direct_template'] ?? null ) );
+
+		if ( '' === trim( $caption ) ) {
+			return false;
+		}
+
 		$image_url = (string) ( $item['image_url'] ?: $product['image_url'] );
 
-		if ( ! empty( Settings::get( 'ai_image_gen' ) ) ) {
-			$generated = AIManager::generate_promo_image( $product );
-
-			if ( ! is_wp_error( $generated ) ) {
-				$image_url = $generated;
-			}
+		if ( ! empty( $meta['image_override'] ) ) {
+			$image_url = (string) $meta['image_override'];
 		}
-
-		if ( ! empty( Settings::get( 'price_badge' ) ) && '' !== $image_url ) {
-			$badged = PriceBadge::apply( $image_url, $product );
-
-			if ( ! is_wp_error( $badged ) ) {
-				$image_url = $badged;
-			}
-		}
-
 
 		if ( '' !== $image_url ) {
 			$result = Client::post_photo( $page_id, $token, $image_url, $caption );
 		} else {
-			$result = Client::post_feed( $page_id, $token, $caption, $product['url'] ?? '' );
+			$result = Client::post_feed( $page_id, $token, $caption, (string) ( $product['url'] ?? '' ) );
 		}
 
 		if ( is_wp_error( $result ) ) {
-			QueueManager::mark_failed( (int) $item['id'], $result->get_error_message(), (int) $item['attempts'] );
-
 			return false;
 		}
 
-		QueueManager::mark_posted( (int) $item['id'], $result['post_id'] );
+		return self::finish( $item, $product, $page_id, 'direct', $result['post_id'], $caption );
+	}
+
+	private static function maybe_poster( array $product, string $mode, array $meta ): string {
+		if ( empty( Settings::get( 'poster_enabled' ) ) ) {
+			return '';
+		}
+
+		if ( ! class_exists( '\AIFB\Poster\Designer' ) ) {
+			return '';
+		}
+
+		$poster = \AIFB\Poster\Designer::generate_for_product(
+			$product,
+			[
+				'size'      => (string) ( $meta['poster_size'] ?? Settings::get( 'poster_size' ) ),
+				'template'  => (string) ( $meta['poster_template'] ?? 'classic' ),
+				'attach_to' => 'queue',
+			]
+		);
+
+		if ( is_wp_error( $poster ) || empty( $poster['url'] ) ) {
+			Logger::warning( 'poster', 'Poster generation failed: ' . ( is_wp_error( $poster ) ? $poster->get_error_message() : 'no URL' ) );
+
+			return '';
+		}
+
+		return (string) $poster['url'];
+	}
+
+	private static function finish( array $item, array $product, string $page_id, string $mode, string $fb_post_id, string $caption ): bool {
+		QueueManager::mark_posted( (int) $item['id'], $fb_post_id );
 		Settings::mark_posted( (int) $item['product_id'] );
 
-		\AIFB\Analytics\Analytics::record( $result['post_id'], (int) $item['id'], $page_id );
+		Rotation::record(
+			(int) $item['product_id'],
+			$page_id,
+			(int) ( json_decode( (string) ( $item['meta'] ?? '{}' ), true )['schedule_id'] ?? 0 ),
+			$mode
+		);
+
+		\AIFB\Analytics\Analytics::record( $fb_post_id, (int) $item['id'], $page_id, $mode );
 
 		Logger::success(
 			'queue',
-			sprintf( 'Posted "%s" to %s (post %s).', $product['name'], (string) $item['page_name'], $result['post_id'] )
+			sprintf( 'Posted "%s" to %s via %s mode (post %s).', $product['name'], (string) $item['page_name'], $mode, $fb_post_id )
 		);
 
 		return true;
 	}
 }
-

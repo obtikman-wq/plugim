@@ -77,3 +77,49 @@
 
 .aifbp-fade { animation: aifbp-fade-in .4s ease; }
 @keyframes aifbp-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* V3 additions */
+.aifbp-mode {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.aifbp-mode-ai { background: #f0f6fc; color: #2271b1; }
+.aifbp-mode-direct { background: #edfaef; color: #00a32a; }
+
+.aifbp-filters { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.aifbp-filters a {
+    text-decoration: none;
+    padding: 3px 12px;
+    border-radius: 999px;
+    background: #f0f0f1;
+    color: #2c3338;
+}
+.aifbp-filters a.aifbp-filter-active { background: #2271b1; color: #fff; }
+
+.aifbp-calendar { table-layout: fixed; }
+.aifbp-calendar td { vertical-align: top; height: 90px; padding: 6px; }
+.aifbp-cal-empty { background: #f6f7f7; }
+.aifbp-cal-item {
+    margin-top: 6px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    font-size: 12px;
+    background: #f0f6fc;
+    border-left: 3px solid #2271b1;
+}
+.aifbp-cal-posted { background: #edfaef; border-left-color: #00a32a; }
+.aifbp-cal-draft { background: #f0f0f1; border-left-color: #646970; }
+.aifbp-cal-failed { background: #fcf0f1; border-left-color: #d63638; }
+.aifbp-cal-actions form { display: inline; }
+.aifbp-cal-actions .button-link { padding: 0 3px; font-size: 11px; }
+
+.aifbp-manage { padding: 10px 0; display: grid; gap: 10px; max-width: 560px; }
+.aifbp-manage form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.aifbp-manage select, .aifbp-manage input[type="text"], .aifbp-manage input[type="url"], .aifbp-manage input[type="datetime-local"] { max-width: 320px; }
+
+.aifbp-inline { display: inline; }
+.aifbp-error-text { color: #d63638; }

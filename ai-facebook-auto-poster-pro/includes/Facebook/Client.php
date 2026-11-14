@@ -14,7 +14,7 @@ final class Client {
 	const GRAPH = 'https://graph.facebook.com/v21.0/';
 
 	public static function fetch_pages( string $user_token ) {
-		$body = self::get( 'me/accounts', [ 'fields' => 'id,name,access_token', 'limit' => 100 ], $user_token );
+		$body = self::get( 'me/accounts', [ 'fields' => 'id,name,access_token,picture{url},tasks', 'limit' => 100 ], $user_token );
 
 		if ( is_wp_error( $body ) ) {
 			return $body;
@@ -28,6 +28,8 @@ final class Client {
 					'id'           => (string) $page['id'],
 					'name'         => (string) ( $page['name'] ?? $page['id'] ),
 					'access_token' => (string) $page['access_token'],
+					'picture'      => (string) ( $page['picture']['data']['url'] ?? '' ),
+					'can_post'     => in_array( 'CREATE_CONTENT', (array) ( $page['tasks'] ?? [] ), true ) || in_array( 'MANAGE', (array) ( $page['tasks'] ?? [] ), true ),
 				];
 			}
 		}
@@ -130,6 +132,13 @@ final class Client {
 		if ( isset( $body['error']['message'] ) ) {
 			$message = (string) $body['error']['message'];
 			Logger::error( 'fb_' . $context, $message );
+
+			$fb_code = (int) ( $body['error']['code'] ?? 0 );
+
+			if ( in_array( $fb_code, [ 4, 17, 32, 613 ], true ) ) {
+				return new \WP_Error( 'aifbp_fb_ratelimit', $message );
+			}
+
 			return new \WP_Error( 'aifbp_fb', $message );
 		}
 
@@ -168,6 +177,130 @@ final class Client {
 
 		if ( isset( $body['error']['message'] ) ) {
 			return new \WP_Error( 'aifbp_fb', (string) $body['error']['message'] );
+		}
+
+		return $body;
+	}
+
+	public static function get_comments( string $page_id, string $token, string $since = '' ) {
+		$args = [
+			'fields' => 'id,message,created_time,from{id,name},parent{id}',
+			'limit'  => 25,
+			'order'  => 'reverse_chronological',
+		];
+
+		if ( '' !== $since ) {
+			$args['since'] = $since;
+		}
+
+		return self::get( $page_id . '/feed', $args, $token );
+	}
+
+	public static function post_comment( string $post_id, string $token, string $message ) {
+		Usage::track( 'fb' );
+
+		$response = wp_remote_post(
+			self::GRAPH . $post_id . '/comments',
+			[
+				'timeout' => 30,
+				'body'    => [
+					'message'      => $message,
+					'access_token' => $token,
+				],
+			]
+		);
+
+		$body = self::raw( $response, 'comment' );
+
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
+
+		return [ 'comment_id' => (string) ( $body['id'] ?? '' ) ];
+	}
+
+	public static function reply_comment( string $comment_id, string $token, string $message ) {
+		Usage::track( 'fb' );
+
+		$response = wp_remote_post(
+			self::GRAPH . $comment_id . '/comments',
+			[
+				'timeout' => 30,
+				'body'    => [
+					'message'      => $message,
+					'access_token' => $token,
+				],
+			]
+		);
+
+		$body = self::raw( $response, 'comment_reply' );
+
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
+
+		return [ 'comment_id' => (string) ( $body['id'] ?? '' ) ];
+	}
+
+	public static function send_message( string $page_id, string $token, string $recipient_id, string $text ) {
+		Usage::track( 'fb' );
+
+		$response = wp_remote_post(
+			self::GRAPH . 'me/messages',
+			[
+				'timeout' => 30,
+				'body'    => [
+					'recipient'    => wp_json_encode( [ 'id' => $recipient_id ] ),
+					'message'      => wp_json_encode( [ 'text' => $text ] ),
+					'access_token' => $token,
+				],
+			]
+		);
+
+		$body = self::raw( $response, 'messenger' );
+
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
+
+		return [ 'recipient_id' => (string) ( $body['recipient_id'] ?? $recipient_id ) ];
+	}
+
+	public static function page_picture( string $page_id, string $token ): string {
+		$body = self::get( $page_id, [ 'fields' => 'picture{url}' ], $token );
+
+		if ( is_wp_error( $body ) ) {
+			return '';
+		}
+
+		return (string) ( $body['picture']['data']['url'] ?? '' );
+	}
+
+	private static function raw( $response, string $context ) {
+		if ( is_wp_error( $response ) ) {
+			Logger::error( 'fb_' . $context, $response->get_error_message() );
+
+			return $response;
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		if ( isset( $body['error']['message'] ) ) {
+			$message = (string) $body['error']['message'];
+			Logger::error( 'fb_' . $context, $message );
+
+			$fb_code = (int) ( $body['error']['code'] ?? 0 );
+
+			if ( in_array( $fb_code, [ 4, 17, 32, 613 ], true ) ) {
+				return new \WP_Error( 'aifbp_fb_ratelimit', $message );
+			}
+
+			return new \WP_Error( 'aifbp_fb', $message );
+		}
+
+		if ( $code >= 400 || ! is_array( $body ) ) {
+			return new \WP_Error( 'aifbp_fb', sprintf( 'Facebook API HTTP %d', $code ) );
 		}
 
 		return $body;

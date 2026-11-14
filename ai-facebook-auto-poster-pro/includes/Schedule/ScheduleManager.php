@@ -3,7 +3,7 @@
 namespace AIFB\Schedule;
 
 use AIFB\Core\DB;
-use AIFB\Product\Picker;
+use AIFB\Product\Rotation;
 use AIFB\Queue\QueueManager;
 use AIFB\Utils\Settings;
 use AIFB\Utils\Logger;
@@ -31,15 +31,53 @@ final class ScheduleManager {
 		wp_clear_scheduled_hook( self::TICK_HOOK );
 	}
 
+	public static function cron_health(): array {
+		$queue_next = wp_next_scheduled( \AIFB\Queue\Processor::CRON_HOOK );
+		$tick_next  = wp_next_scheduled( self::TICK_HOOK );
+
+		return [
+			'wp_cron_enabled'   => ! defined( 'DISABLE_WP_CRON' ) || ! DISABLE_WP_CRON,
+			'constant'          => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
+			'action_scheduler'  => \AIFB\Queue\Processor::action_scheduler_available(),
+			'queue_next_run'    => $queue_next ? date( 'Y-m-d H:i:s', (int) $queue_next ) : null,
+			'scheduler_next_run' => $tick_next ? date( 'Y-m-d H:i:s', (int) $tick_next ) : null,
+			'last_tick_late'    => null !== $tick_next && (int) $tick_next < time() - 30 * MINUTE_IN_SECONDS,
+		];
+	}
+
 	public static function create( array $data ): int|\WP_Error {
 		global $wpdb;
 
 		$type = in_array( $data['type'] ?? '', [ 'daily', 'weekly', 'campaign' ], true ) ? $data['type'] : 'daily';
 
+		$row = self::build_row( $data, $type );
+
+		$wpdb->insert( DB::table_schedules(), $row );
+
+		if ( $wpdb->last_error ) {
+			return new \WP_Error( 'aifbp_db', $wpdb->last_error );
+		}
+
+		return (int) $wpdb->insert_id;
+	}
+
+	private static function build_row( array $data, string $type, ?array $existing = null ): array {
+		$s = Settings::all();
+
+		$mode = in_array( $data['mode'] ?? '', [ 'ai', 'direct' ], true ) ? $data['mode'] : 'ai';
+
 		$row = [
 			'name'             => sanitize_text_field( $data['name'] ?? __( 'Schedule', 'aifbp' ) ),
 			'type'             => $type,
 			'time_of_day'      => self::sanitize_time( $data['time_of_day'] ?? '10:00' ),
+			'times'            => self::sanitize_times( $data['times'] ?? '' ),
+			'window_start'     => self::sanitize_time( $data['window_start'] ?? '' ),
+			'window_end'       => self::sanitize_time( $data['window_end'] ?? '' ),
+			'mode'             => $mode,
+			'selection'        => sanitize_key( $data['selection'] ?? 'random' ),
+			'categories'       => wp_json_encode( array_values( array_filter( array_map( 'absint', (array) ( $data['categories'] ?? [] ) ) ) ) ),
+			'content_format'   => sanitize_key( $data['content_format'] ?? ( 'direct' === $mode ? 'short' : 'full' ) ),
+			'template_name'    => sanitize_text_field( $data['template_name'] ?? '' ),
 			'days'             => self::sanitize_days( $data['days'] ?? '1,2,3,4,5,6,0' ),
 			'posts_per_run'    => max( 1, (int) ( $data['posts_per_run'] ?? 1 ) ),
 			'interval_minutes' => max( 5, (int) ( $data['interval_minutes'] ?? 120 ) ),
@@ -50,15 +88,17 @@ final class ScheduleManager {
 			'next_run'         => null,
 		];
 
-		$row['next_run'] = self::compute_next_run( $row );
-
-		$wpdb->insert( DB::table_schedules(), $row );
-
-		if ( $wpdb->last_error ) {
-			return new \WP_Error( 'aifbp_db', $wpdb->last_error );
+		if ( $existing ) {
+			foreach ( $row as $key => $value ) {
+				if ( ! array_key_exists( $key, $data ) && null !== $existing[ $key ] ?? false ) {
+					$row[ $key ] = $existing[ $key ];
+				}
+			}
 		}
 
-		return (int) $wpdb->insert_id;
+		$row['next_run'] = self::compute_next_run( $row );
+
+		return $row;
 	}
 
 	public static function update( int $id, array $data ): void {
@@ -70,26 +110,34 @@ final class ScheduleManager {
 			return;
 		}
 
-		$merged = array_merge( $existing, $data );
-		$merged['next_run'] = self::compute_next_run( $merged );
+		$type = in_array( $data['type'] ?? $existing['type'], [ 'daily', 'weekly', 'campaign' ], true ) ? ( $data['type'] ?? $existing['type'] ) : 'daily';
+		$row  = self::build_row( array_merge( $existing, $data ), $type, $existing );
 
-		$wpdb->update(
+		$wpdb->update( DB::table_schedules(), $row, [ 'id' => $id ] );
+	}
+
+	public static function set_active( int $id, bool $active ): bool {
+		global $wpdb;
+
+		$updated = $wpdb->update(
 			DB::table_schedules(),
-			[
-				'name'             => sanitize_text_field( $merged['name'] ),
-				'type'             => sanitize_key( $merged['type'] ),
-				'time_of_day'      => self::sanitize_time( $merged['time_of_day'] ),
-				'days'             => self::sanitize_days( $merged['days'] ),
-				'posts_per_run'    => max( 1, (int) $merged['posts_per_run'] ),
-				'interval_minutes' => max( 5, (int) $merged['interval_minutes'] ),
-				'pages'            => wp_json_encode( array_values( array_filter( array_map( 'sanitize_text_field', (array) self::decode_pages( $merged['pages'] ) ) ) ) ),
-				'start_date'       => self::sanitize_date( $merged['start_date'] ),
-				'end_date'         => self::sanitize_date( $merged['end_date'] ),
-				'active'           => ! empty( $merged['active'] ) ? 1 : 0,
-				'next_run'         => $merged['next_run'],
-			],
+			[ 'active' => $active ? 1 : 0 ],
 			[ 'id' => $id ]
 		);
+
+		if ( $active ) {
+			$schedule = self::get( $id );
+
+			if ( $schedule ) {
+				$wpdb->update(
+					DB::table_schedules(),
+					[ 'next_run' => self::compute_next_run( $schedule ) ],
+					[ 'id' => $id ]
+				);
+			}
+		}
+
+		return (bool) $updated;
 	}
 
 	public static function delete( int $id ): void {
@@ -164,8 +212,20 @@ final class ScheduleManager {
 		$base     = strtotime( current_time( 'mysql' ) );
 		$enqueued = 0;
 
+		$categories = (array) json_decode( (string) $schedule['categories'], true );
+		$mode       = (string) ( $schedule['mode'] ?? 'ai' );
+		$selection  = (string) ( $schedule['selection'] ?? 'random' );
+
 		for ( $i = 0; $i < $posts; $i++ ) {
-			$product = Picker::random_product();
+			$product = Rotation::pick(
+				[
+					'selection'         => $selection,
+					'categories'        => $categories,
+					'page_id'           => (string) $pages[ $i % count( $pages ) ],
+					'schedule_id'       => (int) $schedule['id'],
+					'mode'              => $mode,
+				]
+			);
 
 			if ( is_wp_error( $product ) ) {
 				Logger::warning( 'schedule', $product->get_error_message() );
@@ -177,7 +237,21 @@ final class ScheduleManager {
 			$page      = Settings::page( $page_id );
 			$scheduled = date( 'Y-m-d H:i:s', $base + $i * $interval * MINUTE_IN_SECONDS );
 
-			$result = QueueManager::enqueue( $product, $page_id, (string) ( $page['name'] ?? $page_id ), $scheduled, 'schedule' );
+			$result = QueueManager::enqueue(
+				$product,
+				$page_id,
+				(string) ( $page['name'] ?? $page_id ),
+				$scheduled,
+				'schedule',
+				[
+					'schedule_id'     => (int) $schedule['id'],
+					'direct_format'   => (string) $schedule['content_format'],
+					'direct_template' => '' !== (string) $schedule['template_name'] ? \AIFB\Product\Templates::template_body( (string) $schedule['template_name'] ) : '',
+					'poster_size'     => (string) Settings::get( 'poster_size' ),
+				],
+				$mode,
+				(string) $schedule['content_format']
+			);
 
 			if ( ! is_wp_error( $result ) ) {
 				$enqueued++;
@@ -187,7 +261,7 @@ final class ScheduleManager {
 		return $enqueued;
 	}
 
-	public static function bulk_enqueue( int $count, string $start, string $end, array $pages, int $interval_minutes ): int|\WP_Error {
+	public static function bulk_enqueue( int $count, string $start, string $end, array $pages, int $interval_minutes, string $mode = 'ai' ): int|\WP_Error {
 		$pages = array_values( array_filter( $pages, fn( $pid ) => null !== Settings::page( (string) $pid ) ) );
 
 		if ( empty( $pages ) ) {
@@ -206,7 +280,13 @@ final class ScheduleManager {
 		$enqueued = 0;
 
 		for ( $i = 0; $i < $count; $i++ ) {
-			$product = Picker::random_product();
+			$product = Rotation::pick(
+				[
+					'selection' => 'random',
+					'page_id'   => (string) $pages[ $i % count( $pages ) ],
+					'mode'      => $mode,
+				]
+			);
 
 			if ( is_wp_error( $product ) ) {
 				break;
@@ -220,7 +300,7 @@ final class ScheduleManager {
 				break;
 			}
 
-			$result = QueueManager::enqueue( $product, $page_id, (string) ( $page['name'] ?? $page_id ), $scheduled, 'bulk' );
+			$result = QueueManager::enqueue( $product, $page_id, (string) ( $page['name'] ?? $page_id ), $scheduled, 'bulk', [], $mode );
 
 			if ( ! is_wp_error( $result ) ) {
 				$enqueued++;
@@ -248,6 +328,8 @@ final class ScheduleManager {
 
 		$days = array_map( 'intval', explode( ',', self::sanitize_days( $schedule['days'] ) ) );
 
+		$times = self::times_list( $schedule );
+
 		for ( $d = 0; $d < 8; $d++ ) {
 			$day_start = strtotime( 'today +' . $d . ' days', $from );
 			$weekday   = (int) date( 'w', $day_start );
@@ -256,20 +338,72 @@ final class ScheduleManager {
 				continue;
 			}
 
-			$candidate = strtotime( date( 'Y-m-d', $day_start ) . ' ' . self::sanitize_time( $schedule['time_of_day'] ) );
+			foreach ( $times as $time ) {
+				$candidate = strtotime( date( 'Y-m-d', $day_start ) . ' ' . $time );
 
-			if ( $candidate > $from ) {
-				return date( 'Y-m-d H:i:s', $candidate );
+				if ( $candidate > $from ) {
+					return date( 'Y-m-d H:i:s', $candidate );
+				}
 			}
 		}
 
 		return date( 'Y-m-d H:i:s', $from + DAY_IN_SECONDS );
 	}
 
+	private static function times_list( array $schedule ): array {
+		$times = self::sanitize_times( $schedule['times'] ?? '' );
+
+		if ( empty( $times ) ) {
+			$times = [ self::sanitize_time( $schedule['time_of_day'] ?? '10:00' ) ];
+		}
+
+		$window_start = trim( (string) ( $schedule['window_start'] ?? '' ) );
+		$window_end   = trim( (string) ( $schedule['window_end'] ?? '' ) );
+
+		if ( '' !== $window_start && '' !== $window_end && strtotime( $window_start ) < strtotime( $window_end ) ) {
+			$random = self::random_time_in_window( $window_start, $window_end );
+
+			if ( null !== $random ) {
+				$times[] = $random;
+			}
+		}
+
+		sort( $times );
+
+		return $times;
+	}
+
+	private static function random_time_in_window( string $start, string $end ): ?string {
+		$start_ts = strtotime( $start );
+		$end_ts   = strtotime( $end );
+
+		if ( false === $start_ts || false === $end_ts || $end_ts <= $start_ts ) {
+			return null;
+		}
+
+		$offset = wp_rand( 0, $end_ts - $start_ts );
+
+		return date( 'H:i', $start_ts + $offset );
+	}
+
 	private static function sanitize_time( $time ): string {
 		$time = trim( (string) $time );
 
-		return preg_match( '/^\d{1,2}:\d{2}$/', $time ) ? sprintf( '%02d:%02d', ...array_map( 'intval', explode( ':', $time ) ) ) : '10:00';
+		return preg_match( '/^\d{1,2}:\d{2}$/', $time ) ? sprintf( '%02d:%02d', ...array_map( 'intval', explode( ':', $time ) ) ) : '';
+	}
+
+	private static function sanitize_times( $times ): array {
+		$out = [];
+
+		foreach ( explode( ',', (string) $times ) as $time ) {
+			$time = self::sanitize_time( $time );
+
+			if ( '' !== $time ) {
+				$out[] = $time;
+			}
+		}
+
+		return array_unique( $out );
 	}
 
 	private static function sanitize_days( $days ): string {

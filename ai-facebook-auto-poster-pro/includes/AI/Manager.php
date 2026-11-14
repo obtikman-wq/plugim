@@ -54,6 +54,20 @@ final class Manager {
 		return $provider->captions( $product, $options );
 	}
 
+	public static function reply( string $system, string $user ): string|\WP_Error {
+		$provider = self::provider();
+
+		if ( is_wp_error( $provider ) ) {
+			return $provider;
+		}
+
+		if ( ! method_exists( $provider, 'ask' ) ) {
+			return new \WP_Error( 'aifbp_ai', __( 'The configured AI provider does not support assistant replies.', 'aifbp' ) );
+		}
+
+		return $provider->ask( $system, $user );
+	}
+
 	public static function rewrite( string $text, string $language = 'Bangla' ): string|\WP_Error {
 		$provider = self::provider();
 

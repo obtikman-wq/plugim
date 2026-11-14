@@ -48,7 +48,10 @@
         previewBtn.addEventListener('click', function () {
             busy(previewBtn, true);
 
-            fetch('/preview')
+            var modeSel = document.getElementById('aifbp-preview-mode');
+            var mode = modeSel ? (modeSel.value || 'ai') : 'ai';
+
+            fetch('/preview?mode=' + encodeURIComponent(mode))
                 .then(function (res) {
                     document.getElementById('aifbp-preview').hidden = false;
                     document.getElementById('aifbp-preview-caption').textContent = res.caption || '';
@@ -60,7 +63,7 @@
                         img.removeAttribute('src');
                     }
 
-                    showResult(true, 'Preview generated for: ' + (res.product ? res.product.name : ''));
+                    showResult(true, (res.mode === 'direct' ? 'Direct preview' : 'AI preview') + ' for: ' + (res.product ? res.product.name : ''));
                 })
                 .catch(function (err) {
                     showResult(false, err.message || 'Preview failed.');

@@ -36,5 +36,7 @@ final class Plugin {
 		Queue\Processor::init();
 		Schedule\ScheduleManager::init();
 		Analytics\Analytics::init();
+		Assistants\Webhooks::init();
+		Assistants\Comments::init();
 	}
 }

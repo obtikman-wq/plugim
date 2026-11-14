@@ -11,6 +11,7 @@ final class Deactivator {
 	public static function deactivate(): void {
 		Queue\Processor::clear_events();
 		Schedule\ScheduleManager::clear_tick();
+		Assistants\Comments::clear();
 
 		global $wpdb;
 		$queue = DB::table_queue();

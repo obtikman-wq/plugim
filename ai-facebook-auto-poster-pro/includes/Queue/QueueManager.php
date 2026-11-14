@@ -11,7 +11,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 final class QueueManager {
 
-	public static function enqueue( array $product, string $page_id, string $page_name, string $scheduled_at, string $source = 'manual', array $meta = [] ): int|\WP_Error {
+	const LOCK_KEY = 'aifbp_queue_lock';
+
+	public static function enqueue( array $product, string $page_id, string $page_name, string $scheduled_at, string $source = 'manual', array $meta = [], string $mode = 'ai', string $content_type = '' ): int|\WP_Error {
 		global $wpdb;
 
 		if ( self::has_active_for_product_page( (int) $product['id'], $page_id ) ) {
@@ -29,6 +31,8 @@ final class QueueManager {
 				'status'        => 'pending',
 				'scheduled_at'  => $scheduled_at,
 				'source'        => sanitize_key( $source ),
+				'mode'          => in_array( $mode, [ 'ai', 'direct' ], true ) ? $mode : 'ai',
+				'content_type'  => sanitize_key( $content_type ),
 				'meta'          => wp_json_encode( $meta ),
 				'created_at'    => current_time( 'mysql' ),
 			]
@@ -67,6 +71,20 @@ final class QueueManager {
 		$last   = (int) ( $posted[ $product_id ] ?? 0 );
 
 		return $last > 0 && $last > time() - $cooldown * DAY_IN_SECONDS;
+	}
+
+	public static function acquire_lock( int $ttl = 120 ): bool {
+		if ( get_transient( self::LOCK_KEY ) ) {
+			return false;
+		}
+
+		set_transient( self::LOCK_KEY, (string) getmypid() ?: '1', max( 30, $ttl ) );
+
+		return true;
+	}
+
+	public static function release_lock(): void {
+		delete_transient( self::LOCK_KEY );
 	}
 
 	public static function claim_due( int $limit = 5 ): array {
@@ -165,6 +183,89 @@ final class QueueManager {
 		);
 	}
 
+	public static function set_caption( int $id, string $caption ): bool {
+		global $wpdb;
+		$table = DB::table_queue();
+
+		$meta = self::meta( $id );
+		$meta['caption_override'] = wp_kses_post( $caption );
+
+		return (bool) $wpdb->update( $table, [ 'meta' => wp_json_encode( $meta ) ], [ 'id' => $id ] );
+	}
+
+	public static function set_image( int $id, string $image_url ): bool {
+		global $wpdb;
+		$table = DB::table_queue();
+
+		return (bool) $wpdb->update( $table, [ 'image_url' => esc_url_raw( $image_url ) ], [ 'id' => $id ] );
+	}
+
+	public static function set_product( int $id, int $product_id, string $product_name, string $image_url = '' ): bool {
+		global $wpdb;
+		$table = DB::table_queue();
+
+		return (bool) $wpdb->update(
+			$table,
+			[
+				'product_id'   => $product_id,
+				'product_name' => sanitize_text_field( $product_name ),
+				'image_url'    => esc_url_raw( $image_url ),
+			],
+			[ 'id' => $id ]
+		);
+	}
+
+	public static function reschedule( int $id, string $scheduled_at ): bool {
+		global $wpdb;
+		$table = DB::table_queue();
+
+		return (bool) $wpdb->update(
+			$table,
+			[ 'scheduled_at' => $scheduled_at, 'status' => 'pending', 'last_error' => '' ],
+			[ 'id' => $id, 'status' => [ 'pending', 'failed', 'cancelled', 'processing' ] ]
+		);
+	}
+
+	public static function duplicate( int $id, ?string $scheduled_at = null ): int|\WP_Error {
+		$item = self::get( $id );
+
+		if ( ! $item ) {
+			return new \WP_Error( 'aifbp_not_found', __( 'Queue item not found.', 'aifbp' ) );
+		}
+
+		$meta = self::meta( $id );
+		unset( $meta['caption_override'] );
+
+		return self::enqueue(
+			[
+				'id'        => (int) $item['product_id'],
+				'name'      => (string) $item['product_name'],
+				'image_url' => (string) $item['image_url'],
+			],
+			(string) $item['page_id'],
+			(string) $item['page_name'],
+			$scheduled_at ?? date( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) + HOUR_IN_SECONDS ),
+			'duplicate',
+			$meta,
+			(string) ( $item['mode'] ?? 'ai' ),
+			(string) ( $item['content_type'] ?? '' )
+		);
+	}
+
+	public static function delete( int $id ): bool {
+		global $wpdb;
+		$table = DB::table_queue();
+
+		return (bool) $wpdb->delete( $table, [ 'id' => $id ], [ '%d' ] );
+	}
+
+	public static function meta( int $id ): array {
+		$item = self::get( $id );
+		$meta = json_decode( (string) ( $item['meta'] ?? '{}' ), true );
+
+		return is_array( $meta ) ? $meta : [];
+	}
+
 	public static function cancel( int $id ): bool {
 		global $wpdb;
 		$table = DB::table_queue();
@@ -184,10 +285,30 @@ final class QueueManager {
 			'posted'     => 0,
 			'failed'     => 0,
 			'cancelled'  => 0,
+			'draft'      => 0,
 		];
 
 		foreach ( $rows as $row ) {
 			$counts[ $row['status'] ] = (int) $row['n'];
+		}
+
+		return $counts;
+	}
+
+	public static function mode_counts(): array {
+		global $wpdb;
+		$table = DB::table_queue();
+
+		$rows = $wpdb->get_results( "SELECT mode, COUNT(*) AS n FROM {$table} WHERE status = 'posted' GROUP BY mode", ARRAY_A ) ?: [];
+
+		$counts = [ 'ai' => 0, 'direct' => 0 ];
+
+		foreach ( $rows as $row ) {
+			$mode = (string) $row['mode'];
+
+			if ( isset( $counts[ $mode ] ) ) {
+				$counts[ $mode ] = (int) $row['n'];
+			}
 		}
 
 		return $counts;
@@ -218,7 +339,7 @@ final class QueueManager {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT id, product_name, page_name, status, scheduled_at, source FROM {$table} WHERE status IN ('pending','processing') ORDER BY scheduled_at ASC LIMIT %d",
+				"SELECT id, product_name, page_name, status, scheduled_at, source, mode FROM {$table} WHERE status IN ('pending','processing') ORDER BY scheduled_at ASC LIMIT %d",
 				$limit
 			),
 			ARRAY_A

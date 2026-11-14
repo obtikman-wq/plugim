@@ -39,7 +39,7 @@ final class Analytics {
 		}
 	}
 
-	public static function record( string $fb_post_id, int $queue_id, string $page_id ): void {
+	public static function record( string $fb_post_id, int $queue_id, string $page_id, string $mode = 'ai' ): void {
 		global $wpdb;
 
 		$wpdb->replace(
@@ -48,6 +48,7 @@ final class Analytics {
 				'fb_post_id' => sanitize_text_field( $fb_post_id ),
 				'queue_id'   => $queue_id,
 				'page_id'    => sanitize_text_field( $page_id ),
+				'mode'       => in_array( $mode, [ 'ai', 'direct' ], true ) ? $mode : 'ai',
 				'fetched_at' => current_time( 'mysql' ),
 			]
 		);
